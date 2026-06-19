@@ -287,7 +287,7 @@ function renderRows() {
         <span class="sub"><span class="pill ${URG_CLASS[r.urgency]}">${URG_LABEL[r.urgency]} urgency</span></span>
       </td>
       <td>${esc(r.partOfHouse)}</td>
-      <td class="mono">${r.laborMin}-${r.laborMax} hrs</td>
+      <td class="mono">${r.inScope === false ? '<span class="missing">N/A</span>' : r.laborMin + '-' + r.laborMax + ' hrs'}</td>
       <td>${r.name ? esc(r.name) : '<span class="missing">Not provided</span>'}</td>
       <td class="mono">${r.phone ? esc(r.phone) : '<span class="missing">Not provided</span>'}</td>
       <td class="mono">${r.email ? esc(r.email) : '<span class="missing">Not provided</span>'}</td>
@@ -311,25 +311,37 @@ function openDetail(id) {
   const r = appState.requests.find(x => x.id === id);
   if (!r) return;
 
+  const out = (r.inScope === false);
+  const _mats = Array.isArray(r.materials) ? r.materials : [];
+  const _tools = Array.isArray(r.tools) ? r.tools : [];
+  const _unc = (r.uncertainties && typeof r.uncertainties === 'object') ? r.uncertainties : {};
+  const _pc = Array.isArray(_unc.phoneCall) ? _unc.phoneCall : (Array.isArray(r.uncertainties) ? r.uncertainties : []);
+  const _os = Array.isArray(_unc.onSite) ? _unc.onSite : [];
+
   const de = distanceAndEta(r.point);
   const uc = { high: 'high', medium: 'med', low: 'low' }[r.urgency];
   const urgLabel = { high: 'High', medium: 'Medium', low: 'Low' }[r.urgency];
 
   // Materials sorted by confidence (already sorted in inference engine)
-  const materialsHTML = r.materials.map(m => `
+  const materialsHTML = _mats.map(m => `
     <div class="mat">
       <span>${esc(m.name)}</span>
       <span class="prob ${m.prob}">${m.prob === 'surely' ? 'Surely' : m.prob === 'likely' ? 'Most likely' : 'Maybe'}</span>
     </div>`).join('');
 
   // Tools list
-  const toolsHTML = r.tools && r.tools.length > 0
-    ? r.tools.map(t => `<li style="padding:4px 0;font-size:.88rem">• ${esc(t)}</li>`).join('')
+  const toolsHTML = _tools.length > 0
+    ? _tools.map(t => `<li style="padding:4px 0;font-size:.88rem">• ${esc(t)}</li>`).join('')
     : '<li style="padding:4px 0;font-size:.88rem;color:var(--muted)">Standard electrician toolkit</li>';
 
   // Uncertainties separated into phone call vs on-site
-  const phoneCallHTML = r.uncertainties.phoneCall.map(u => `<li>${esc(u)}</li>`).join('');
-  const onSiteHTML = r.uncertainties.onSite.map(u => `<li>${esc(u)}</li>`).join('');
+  const phoneCallHTML = _pc.map(u => `<li>${esc(u)}</li>`).join('');
+  const onSiteHTML = _os.map(u => `<li>${esc(u)}</li>`).join('');
+
+  const materialsSection = out ? '' : `<div class="divider"></div><p class="block-label">Materials needed (ranked by confidence)</p>${materialsHTML}`;
+  const toolsSection = out ? '' : `<div class="divider"></div><p class="block-label">Tools required</p><ul style="list-style:none;margin:8px 0;padding:0">${toolsHTML}</ul>`;
+  const prepSection = out ? '' : `<div class="divider"></div><p class="block-label">📞 Questions for booking phone call</p><ul class="checks">${phoneCallHTML}</ul><div class="divider"></div><p class="block-label">🔧 On-site checks before starting work</p><ul class="checks">${onSiteHTML}</ul>`;
+  const scopeSection = out ? `<div class="divider"></div><p class="msg" style="font-style:normal">This looks like a new installation or project, not a fix or repair, so it is outside the repair scope. Urgency and location are still flagged above. Materials, tools, labor, and prep questions are not estimated for out-of-scope jobs.</p>` : '';
 
   const avgDuration = (r.laborMin + r.laborMax) / 2 + 1;
   const slots = nextAvailable(avgDuration, 2);
@@ -384,7 +396,7 @@ function openDetail(id) {
           <dt>Job type</dt><dd>${esc(r.jobType)}</dd>
           <dt>Part of house</dt><dd>${esc(r.partOfHouse)}</dd>
           <dt>Urgency</dt><dd><span class="pill ${uc}">${urgLabel}</span></dd>
-          <dt>Est. labor</dt><dd class="mono">${r.laborMin}-${r.laborMax} hours</dd>
+          <dt>Est. labor</dt><dd class="mono">${out ? '<span class="missing">Not applicable (out of repair scope)</span>' : r.laborMin + '-' + r.laborMax + ' hours'}</dd>
         </dl>
 
 
@@ -398,24 +410,7 @@ function openDetail(id) {
         ${etaHTML}
 
 
-        <div class="divider"></div>
-        <p class="block-label">Materials needed (ranked by confidence)</p>
-        ${materialsHTML}
-
-
-        <div class="divider"></div>
-        <p class="block-label">Tools required</p>
-        <ul style="list-style:none;margin:8px 0;padding:0">${toolsHTML}</ul>
-
-
-        <div class="divider"></div>
-        <p class="block-label">📞 Questions for booking phone call</p>
-        <ul class="checks">${phoneCallHTML}</ul>
-
-
-        <div class="divider"></div>
-        <p class="block-label">🔧 On-site checks before starting work</p>
-        <ul class="checks">${onSiteHTML}</ul>
+        ${scopeSection}${materialsSection}${toolsSection}${prepSection}
       </div>
 
 
