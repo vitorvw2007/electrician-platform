@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Electrician Job Dispatch Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#16202B;
+    --ink-soft:#3A4756;
+    --muted:#6B7785;
+    --line:#E3E7EC;
+    --surface:#FFFFFF;
+    --canvas:#F4F6F8;
+    --copper:#B5651D;
+    --copper-soft:#F4E6D6;
+
+
+    --high:#B23B36;        --high-bg:#FBECEA;   --high-line:#E7B3AE;
+    --med:#B8801A;         --med-bg:#FBF3DF;    --med-line:#E8CE8F;
+    --low:#2E7D5B;         --low-bg:#E7F4EE;    --low-line:#A9D6C2;
+
+
+    --radius:10px;
+    --shadow:0 1px 2px rgba(20,32,43,.06), 0 8px 24px rgba(20,32,43,.06);
+    --font-sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    --font-mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:var(--font-sans);
+    color:var(--ink);
+    background:var(--canvas);
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    background:var(--ink);
+    color:#fff;
+    padding:18px 24px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+  }
+  .brand{display:flex;align-items:center;gap:12px}
+  .bolt{
+    width:34px;height:34px;border-radius:9px;
+    background:var(--copper);
+    display:grid;place-items:center;
+    flex:none;
+  }
+  .bolt svg{width:18px;height:18px;display:block}
+  .brand-name{font-weight:700;font-size:1.02rem;letter-spacing:.01em}
+  .brand-sub{font-size:.78rem;color:#AEB9C4;font-family:var(--font-mono)}
+  .base-chip{
+    font-family:var(--font-mono);font-size:.74rem;color:#C7D0D9;
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.12);
+    padding:7px 12px;border-radius:8px;
+    display:flex;align-items:center;gap:8px;cursor:pointer;
+    transition:background .15s;
+  }
+  .base-chip:hover{background:rgba(255,255,255,.1)}
+  .base-chip b{color:#fff;font-weight:600}
+  .topbar-actions{display:flex;gap:10px;align-items:center}
+  .btn-icon{
+    background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.12);
+    color:#fff;padding:8px 12px;border-radius:8px;
+    cursor:pointer;font-size:.82rem;display:flex;align-items:center;gap:6px;
+    transition:background .15s;font-family:var(--font-sans);font-weight:500;
+  }
+  .btn-icon:hover{background:rgba(255,255,255,.1)}
+  .btn-icon svg{width:16px;height:16px}
+
+
+  /* ---------- Layout ---------- */
+  .wrap{max-width:1120px;margin:0 auto;padding:26px 24px 64px}
+
+
+  .view-head{margin-bottom:18px}
+  .eyebrow{
+    font-family:var(--font-mono);font-size:.72rem;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--copper);font-weight:600;margin:0 0 6px
+  }
+  h1{font-size:1.5rem;margin:0;font-weight:700;letter-spacing:-.01em}
+  .lede{color:var(--muted);font-size:.92rem;margin:6px 0 0}
+
+
+  /* ---------- Summary strip ---------- */
+  .summary{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 22px}
+  .stat{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:13px 16px;min-width:128px;flex:1 1 128px;box-shadow:var(--shadow)
+  }
+  .stat .n{font-size:1.5rem;font-weight:700;font-family:var(--font-mono);line-height:1}
+  .stat .l{font-size:.76rem;color:var(--muted);margin-top:5px;display:flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .dot.high{background:var(--high)} .dot.med{background:var(--med)} .dot.low{background:var(--low)}
+
+
+  /* ---------- Table ---------- */
+  .table-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;min-width:760px}
+  thead th{
+    text-align:left;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);font-weight:600;padding:13px 16px;border-bottom:1px solid var(--line);
+    background:#FAFBFC;white-space:nowrap
+  }
+  tbody tr{
+    cursor:pointer;border-bottom:1px solid var(--line);
+    border-left:4px solid transparent;transition:background .12s ease
+  }
+  tbody tr:last-child{border-bottom:none}
+  tbody tr:hover{background:#FAFBFC}
+  tbody tr:focus-visible{outline:none;background:#F1F4F7;box-shadow:inset 0 0 0 2px var(--copper)}
+  tbody tr.u-high{border-left-color:var(--high);background:var(--high-bg)}
+  tbody tr.u-high:hover{background:#F8E2DF}
+  tbody tr.u-med{border-left-color:var(--med);background:var(--med-bg)}
+  tbody tr.u-med:hover{background:#F8ECCF}
+  tbody tr.u-low{border-left-color:var(--low);background:var(--low-bg)}
+  tbody tr.u-low:hover{background:#DEEEE6}
+  td{padding:14px 16px;font-size:.9rem;vertical-align:middle}
+  td.job{font-weight:600}
+  .sub{display:block;font-size:.76rem;color:var(--muted);font-weight:400;margin-top:2px}
+  .mono{font-family:var(--font-mono);font-size:.84rem}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;font-size:.72rem;font-weight:600;
+    padding:3px 9px;border-radius:999px;white-space:nowrap;font-family:var(--font-mono)
+  }
+  .pill.high{background:var(--high-bg);color:var(--high);border:1px solid var(--high-line)}
+  .pill.med{background:var(--med-bg);color:var(--med);border:1px solid var(--med-line)}
+  .pill.low{background:var(--low-bg);color:var(--low);border:1px solid var(--low-line)}
+  .missing{color:#A7B0BA;font-style:italic;font-size:.84rem}
+  .hint{font-size:.78rem;color:var(--muted);margin:14px 2px 0;display:flex;align-items:center;gap:7px}
+
+
+  /* ---------- Detail view ---------- */
+  .hidden{display:none !important}
+  .back{
+    background:none;border:1px solid var(--line);color:var(--ink-soft);
+    font-family:var(--font-sans);font-size:.84rem;font-weight:500;
+    padding:8px 14px;border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+    margin-bottom:18px;transition:background .12s
+  }
+  .back:hover{background:#fff;border-color:#cfd5dc}
+  .back:focus-visible{outline:2px solid var(--copper);outline-offset:2px}
+
+
+  .detail-head{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:22px 24px;margin-bottom:18px;
+    display:flex;justify-content:space-between;align-items:flex-start;gap:18px;flex-wrap:wrap;
+    border-top:5px solid var(--copper)
+  }
+  .detail-head.u-high{border-top-color:var(--high)}
+  .detail-head.u-med{border-top-color:var(--med)}
+  .detail-head.u-low{border-top-color:var(--low)}
+  .detail-head h2{margin:0;font-size:1.4rem;font-weight:700}
+  .detail-head .where{color:var(--muted);font-size:.9rem;margin-top:4px}
+
+
+  .grid{display:grid;grid-template-columns:1.35fr 1fr;gap:18px;align-items:start}
+  .card{
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:var(--shadow);padding:20px 22px
+  }
+  .card h3{
+    margin:0 0 16px;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--copper);font-weight:600;display:flex;align-items:center;gap:8px
+  }
+  .card h3 .num{
+    font-family:var(--font-mono);background:var(--copper-soft);color:var(--copper);
+    width:22px;height:22px;border-radius:6px;display:grid;place-items:center;font-size:.72rem
+  }
+
+
+  .kv{display:grid;grid-template-columns:140px 1fr;gap:10px 14px;font-size:.9rem}
+  .kv dt{color:var(--muted);font-weight:500}
+  .kv dd{margin:0;color:var(--ink);font-weight:500}
+  .kv dd.mono{font-family:var(--font-mono);font-weight:400}
+  .kv a{color:var(--copper);text-decoration:none}
+  .kv a:hover{text-decoration:underline}
+
+
+  .divider{height:1px;background:var(--line);margin:18px 0}
+  .block-label{font-size:.74rem;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin:0 0 10px}
+
+
+  .msg{
+    font-size:.9rem;color:var(--ink-soft);background:var(--canvas);
+    border:1px solid var(--line);border-radius:8px;padding:12px 14px;font-style:italic
+  }
+
+
+  ul.checks{list-style:none;margin:0;padding:0}
+  ul.checks li{
+    display:flex;gap:10px;font-size:.88rem;padding:8px 0;border-bottom:1px dashed var(--line);color:var(--ink-soft)
+  }
+  ul.checks li:last-child{border-bottom:none}
+  ul.checks li::before{content:"?";font-family:var(--font-mono);color:var(--copper);font-weight:700;flex:none}
+
+
+  .mat{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:.88rem}
+  .mat:last-child{border-bottom:none}
+  .prob{font-family:var(--font-mono);font-size:.68rem;font-weight:600;padding:3px 8px;border-radius:999px;white-space:nowrap}
+  .prob.surely{background:#E7F4EE;color:#2E7D5B;border:1px solid #A9D6C2}
+  .prob.likely{background:#FBF3DF;color:#9A6A12;border:1px solid #E8CE8F}
+  .prob.maybe{background:#EEF1F4;color:#6B7785;border:1px solid #D8DEE4}
+
+
+  .eta{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px}
+  .eta .box{flex:1 1 120px;background:var(--canvas);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+  .eta .box .v{font-size:1.25rem;font-weight:700;font-family:var(--font-mono);line-height:1}
+  .eta .box .k{font-size:.72rem;color:var(--muted);margin-top:4px}
+
+
+  .sched-row{display:flex;align-items:flex-start;gap:10px;font-size:.88rem;padding:9px 0;border-bottom:1px dashed var(--line)}
+  .sched-row:last-child{border-bottom:none}
+  .sched-row .ico{flex:none;color:var(--copper);margin-top:1px}
+  .slot{font-family:var(--font-mono);font-weight:600;color:var(--ink)}
+  .nearby-item{font-size:.84rem;color:var(--ink-soft);display:flex;justify-content:space-between;gap:10px;padding:6px 0}
+  .nearby-item .d{font-family:var(--font-mono);color:var(--muted);white-space:nowrap}
+
+
+  .note{
+    margin-top:26px;font-size:.78rem;color:var(--muted);
+    background:#fff;border:1px solid var(--line);border-left:3px solid var(--copper);
+    border-radius:8px;padding:12px 16px
+  }
+
+
+  /* ---------- Modal ---------- */
+  .modal-overlay{
+    position:fixed;top:0;left:0;right:0;bottom:0;
+    background:rgba(22,32,43,.75);
+    display:flex;align-items:center;justify-content:center;
+    z-index:1000;padding:20px;
+  }
+  .modal{
+    background:var(--surface);border-radius:var(--radius);
+    box-shadow:0 20px 60px rgba(0,0,0,.3);
+    max-width:600px;width:100%;max-height:90vh;overflow:auto;
+  }
+  .modal-header{
+    padding:20px 24px;border-bottom:1px solid var(--line);
+    display:flex;justify-content:space-between;align-items:center;
+  }
+  .modal-header h2{margin:0;font-size:1.2rem;font-weight:700}
+  .modal-close{
+    background:none;border:none;color:var(--muted);cursor:pointer;
+    font-size:1.5rem;line-height:1;padding:0;width:32px;height:32px;
+    border-radius:6px;transition:background .15s;
+  }
+  .modal-close:hover{background:var(--canvas)}
+  .modal-body{padding:24px}
+  .modal-footer{
+    padding:16px 24px;border-top:1px solid var(--line);
+    display:flex;gap:10px;justify-content:flex-end;
+  }
+
+
+  .form-group{margin-bottom:18px}
+  .form-group label{
+    display:block;font-size:.82rem;font-weight:600;color:var(--ink-soft);
+    margin-bottom:6px;
+  }
+  .form-group input,.form-group textarea{
+    width:100%;padding:10px 12px;border:1px solid var(--line);
+    border-radius:8px;font-family:var(--font-sans);font-size:.9rem;
+    transition:border-color .15s;
+  }
+  .form-group input:focus,.form-group textarea:focus{
+    outline:none;border-color:var(--copper);
+  }
+  .form-group textarea{resize:vertical;min-height:80px}
+  .form-group small{display:block;margin-top:4px;font-size:.76rem;color:var(--muted)}
+
+
+  .btn{
+    padding:10px 18px;border-radius:8px;font-family:var(--font-sans);
+    font-size:.88rem;font-weight:600;cursor:pointer;transition:all .15s;
+    border:none;display:inline-flex;align-items:center;gap:8px;
+  }
+  .btn-primary{background:var(--copper);color:#fff}
+  .btn-primary:hover{background:#9A5418}
+  .btn-secondary{background:var(--canvas);color:var(--ink-soft);border:1px solid var(--line)}
+  .btn-secondary:hover{background:#E8EBED}
+
+
+  .file-upload{
+    border:2px dashed var(--line);border-radius:8px;padding:24px;
+    text-align:center;cursor:pointer;transition:all .15s;
+  }
+  .file-upload:hover{border-color:var(--copper);background:var(--canvas)}
+  .file-upload input{display:none}
+  .file-upload-icon{font-size:2rem;margin-bottom:8px}
+
+
+  .empty-state{
+    text-align:center;padding:60px 20px;color:var(--muted);
+  }
+  .empty-state-icon{font-size:3rem;margin-bottom:16px;opacity:.5}
+  .empty-state h3{margin:0 0 8px;color:var(--ink-soft);font-size:1.1rem}
+  .empty-state p{margin:0 0 20px;font-size:.9rem}
+
+
+  footer{text-align:center;color:#9AA4AE;font-size:.76rem;margin-top:40px;font-family:var(--font-mono)}
+
+
+  @media (max-width:780px){
+    .grid{grid-template-columns:1fr}
+    .kv{grid-template-columns:118px 1fr}
+    h1{font-size:1.3rem}
+    .topbar{flex-direction:column;align-items:stretch}
+    .topbar-actions{justify-content:center}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important}
+  }
+</style>
+</head>
+<body>
+
+
+<header class="topbar">
+  <div class="brand">
+    <span class="bolt" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" fill="#fff"/></svg>
+    </span>
+    <div>
+      <div class="brand-name">Electrician Job Dispatch</div>
+      <div class="brand-sub">Service request analyzer</div>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <div class="base-chip" id="baseChip" title="Click to change base address">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z" stroke="#C7D0D9" stroke-width="2"/><circle cx="12" cy="10" r="2.5" stroke="#C7D0D9" stroke-width="2"/></svg>
+      Base: <b id="baseLabel">Not set</b>
+    </div>
+    <button class="btn-icon" id="importBtn" title="Import customer data">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Import
+    </button>
+    <button class="btn-icon" id="exportBtn" title="Export data">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Export
+    </button>
+  </div>
+</header>
+
+
+<div class="wrap">
+
+
+  <!-- ============ PAGE 1: OVERVIEW ============ -->
+  <section id="overview">
+    <div class="view-head">
+      <p class="eyebrow">Service requests overview</p>
+      <h1>Incoming service requests</h1>
+      <p class="lede">Sorted by urgency. Select any row to open the full job summary.</p>
+    </div>
+
+
+    <div id="emptyState" class="empty-state hidden">
+      <div class="empty-state-icon">📋</div>
+      <h3>No requests yet</h3>
+      <p>Import a CSV file with customer service requests to get started</p>
+      <button class="btn btn-primary" onclick="document.getElementById('importBtn').click()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Import CSV File
+      </button>
+    </div>
+
+
+    <div id="dataView" class="hidden">
+      <div class="summary" id="summary"></div>
+
+
+      <div class="table-card">
+        <div class="scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Job type</th>
+                <th>Part of house</th>
+                <th>Est. labor</th>
+                <th>Customer</th>
+                <th>Phone</th>
+                <th>Email</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="hint">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#6B7785" stroke-width="2"/><path d="M12 8v5M12 16h.01" stroke="#6B7785" stroke-width="2" stroke-linecap="round"/></svg>
+        Row color shows urgency. Job type, part of house, labor and urgency are AI-inferred estimates for confirmation.
+      </p>
+    </div>
+  </section>
+
+
+  <!-- ============ PAGE 2: DETAIL ============ -->
+  <section id="detail" class="hidden"></section>
+
+
+  <footer>Electrician Job Dispatch Platform · Built for service request analysis</footer>
+</div>
+
+
+<!-- ============ MODALS ============ -->
+
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>⚙️ Settings</h2>
+      <button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label for="businessName">Business Name</label>
+        <input type="text" id="businessName" placeholder="Your Electric Company">
+      </div>
+      <div class="form-group">
+        <label for="baseAddress">Base Address</label>
+        <input type="text" id="baseAddress" placeholder="123 Main St, City, State ZIP">
+        <small>Used to calculate distance and drive time to customer locations</small>
+      </div>
+      <div class="form-group">
+        <label for="businessHours">Business Hours</label>
+        <input type="text" id="businessHours" value="8:00 AM - 5:00 PM" readonly>
+        <small>Currently fixed at 8 AM - 5 PM, Monday-Friday</small>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('settingsModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Import Modal -->
+<div id="importModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>📥 Import Customer Data</h2>
+      <button class="modal-close" onclick="closeModal('importModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p style="margin:0 0 16px;color:var(--muted);font-size:.88rem">
+        Upload a CSV file with customer service requests. Required columns: Customer Name, Customer Phone Number, Customer Email, Customer Address, Customer description of the problem
+      </p>
+      <div class="file-upload" onclick="document.getElementById('csvFile').click()">
+        <div class="file-upload-icon">📄</div>
+        <div><strong>Click to select CSV file</strong></div>
+        <div style="font-size:.82rem;color:var(--muted);margin-top:4px">or drag and drop here</div>
+        <input type="file" id="csvFile" accept=".csv" onchange="handleFileSelect(event)">
+      </div>
+      <div id="importPreview" class="hidden" style="margin-top:16px">
+        <p style="font-size:.82rem;color:var(--copper);font-weight:600;margin:0 0 8px">Preview:</p>
+        <div id="previewContent" style="font-size:.82rem;color:var(--muted)"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('importModal')">Cancel</button>
+      <button class="btn btn-primary" id="confirmImport" onclick="confirmImport()" disabled>Import Data</button>
+    </div>
+  </div>
+</div>
+
+
+<script src="js-inference-engine.js"></script>
+<script src="js-app.js"></script>
+
+
+</body>
+</html>
