@@ -367,10 +367,13 @@
 
   <!-- ============ PAGE 1: OVERVIEW ============ -->
   <section id="overview">
-    <div class="view-head">
-      <p class="eyebrow">Service requests overview</p>
-      <h1>Incoming service requests</h1>
-      <p class="lede">Sorted by urgency. Select any row to open the full job summary.</p>
+    <div class="view-head" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+      <div>
+        <p class="eyebrow" id="ovEyebrow">Service requests overview</p>
+        <h1 id="ovTitle">Incoming service requests</h1>
+        <p class="lede" id="ovLede">Sorted by urgency. Select any row to open the full job summary.</p>
+      </div>
+      <button id="screenToggle" class="btn btn-secondary">View scheduled services</button>
     </div>
 
 
@@ -382,6 +385,13 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Import CSV File
       </button>
+    </div>
+
+
+    <div id="emptyStateAlt" class="empty-state hidden">
+      <div class="empty-state-icon" id="emptyStateAltIcon">📋</div>
+      <h3 id="emptyStateAltHeading"></h3>
+      <p id="emptyStateAltText"></p>
     </div>
 
 
@@ -443,9 +453,30 @@
         <small>Used to calculate distance and drive time to customer locations</small>
       </div>
       <div class="form-group">
-        <label for="businessHours">Business Hours</label>
-        <input type="text" id="businessHours" value="8:00 AM - 5:00 PM" readonly>
-        <small>Currently fixed at 8 AM - 5 PM, Monday-Friday</small>
+        <label>Business hours</label>
+        <div style="display:flex;gap:10px;align-items:center">
+          <input type="time" id="businessStart" style="flex:1">
+          <span style="color:var(--muted);font-size:.85rem">to</span>
+          <input type="time" id="businessEnd" style="flex:1">
+        </div>
+        <small>The window each weekday when work can be scheduled.</small>
+      </div>
+      <div class="form-group">
+        <label for="dailyCap">Daily work cap (hours)</label>
+        <input type="number" id="dailyCap" step="0.5" min="0">
+        <small>Covers services and driving and any work activity in a single day.</small>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;font-weight:600">
+          <input type="checkbox" id="lunchEnabled" style="width:auto;margin:0">
+          Block a lunch break
+        </label>
+        <div style="display:flex;gap:10px;align-items:center;margin-top:8px">
+          <input type="time" id="lunchStart" style="flex:1">
+          <span style="color:var(--muted);font-size:.85rem">to</span>
+          <input type="time" id="lunchEnd" style="flex:1">
+        </div>
+        <small>When enabled, jobs route around this window. Lunch does not count toward the daily cap.</small>
       </div>
     </div>
     <div class="modal-footer">
@@ -481,6 +512,34 @@
     <div class="modal-footer">
       <button class="btn btn-secondary" onclick="closeModal('importModal')">Cancel</button>
       <button class="btn btn-primary" id="confirmImport" onclick="confirmImport()" disabled>Import Data</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- Schedule Modal -->
+<div id="scheduleModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="schedTitle">Schedule service</h2>
+      <button class="modal-close" onclick="closeModal('scheduleModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p id="schedRationale" style="margin:0 0 18px;color:var(--muted);font-size:.88rem"></p>
+      <div class="form-group">
+        <label for="schedStart">Start</label>
+        <input type="datetime-local" id="schedStart" oninput="onScheduleStartChange()">
+      </div>
+      <div class="form-group">
+        <label for="schedEnd">End</label>
+        <input type="datetime-local" id="schedEnd" oninput="refreshScheduleWarnings()">
+      </div>
+      <button class="btn btn-secondary" id="schedSuggestBtn" type="button">Use suggested window</button>
+      <div id="schedWarn" style="margin-top:16px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
+      <button class="btn btn-primary" id="schedConfirmBtn" onclick="confirmSchedule()">Confirm schedule</button>
     </div>
   </div>
 </div>
