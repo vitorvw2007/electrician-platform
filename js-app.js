@@ -322,6 +322,11 @@ function confirmImport() {
 
 // ============ DATA EXPORT ============
 function exportData() {
+  if (appState.currentScreen === 'scheduled') {
+    exportScheduleAsICS();
+    return;
+  }
+
   if (appState.requests.length === 0) {
     alert('No data to export');
     return;
@@ -347,6 +352,77 @@ function exportData() {
   a.download = `electrician-requests-${new Date().toISOString().split('T')[0]}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+
+// Export every scheduled job as an .ics calendar file (RFC 5545), importable into
+// Google Calendar, Apple Calendar, Outlook, and other calendar apps.
+function exportScheduleAsICS() {
+  const scheduledJobs = appState.requests.filter(r => r.scheduled === true && r.scheduledStart && r.scheduledEnd);
+  if (scheduledJobs.length === 0) {
+    alert('No scheduled services to export');
+    return;
+  }
+
+  const stamp = toICSDateTime(new Date().toISOString());
+  const events = scheduledJobs.map(r => buildICSEvent(r, stamp)).join('\r\n');
+
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Electrician Job Dispatch//Scheduling//EN',
+    'CALSCALE:GREGORIAN',
+    events,
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  const blob = new Blob([ics], { type: 'text/calendar' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `scheduled-services-${new Date().toISOString().split('T')[0]}.ics`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+
+// Build a single VEVENT block for one scheduled job.
+function buildICSEvent(r, stamp) {
+  const descLines = [
+    `Job type: ${r.jobType || 'Not determined'}`,
+    `Urgency: ${r.urgency || 'unknown'}`,
+    r.phone ? `Phone: ${r.phone}` : null,
+    r.email ? `Email: ${r.email}` : null,
+    r.message ? `Customer message: ${r.message}` : null
+  ].filter(Boolean).join('\n');
+
+  return [
+    'BEGIN:VEVENT',
+    `UID:job-${r.id}@electrician-job-dispatch`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${toICSDateTime(r.scheduledStart)}`,
+    `DTEND:${toICSDateTime(r.scheduledEnd)}`,
+    `SUMMARY:${escapeICSText(r.jobType || 'Service call')} for ${escapeICSText(r.name || 'customer')}`,
+    r.address ? `LOCATION:${escapeICSText(r.address)}` : null,
+    `DESCRIPTION:${escapeICSText(descLines)}`,
+    'END:VEVENT'
+  ].filter(Boolean).join('\r\n');
+}
+
+
+// Convert an ISO timestamp (already UTC) into the YYYYMMDDTHHMMSSZ form ICS requires.
+function toICSDateTime(iso) {
+  return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
+
+// Escape text per RFC 5545 (backslash, semicolon, comma, newline).
+function escapeICSText(s) {
+  return String(s)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\n/g, '\\n');
 }
 
 
@@ -439,46 +515,95 @@ function renderSummary(list) {
 }
 
 
+const URGENCY_RANK = { high: 0, medium: 1, low: 2 };
+const URG_LABEL = { high: 'High', medium: 'Medium', low: 'Low' };
+const URG_CLASS = { high: 'high', medium: 'med', low: 'low' };
+
+
+// Swap the table header to match the active screen's columns.
+function updateRowsHead(scheduledScreen) {
+  document.getElementById('rowsHead').innerHTML = scheduledScreen
+    ? `<th>Job type</th><th>Booked window</th><th>Part of house</th><th>Est. labor</th><th>Customer</th><th>Phone</th><th>Email</th>`
+    : `<th>Job type</th><th>Part of house</th><th>Est. labor</th><th>Customer</th><th>Phone</th><th>Email</th>`;
+}
+
+
+// Build one clickable job row. Includes the booked-window column when on the Scheduled screen.
+function buildJobRow(r, scheduledScreen) {
+  const tr = document.createElement('tr');
+  tr.className = 'u-' + URG_CLASS[r.urgency];
+  tr.tabIndex = 0;
+  tr.setAttribute('role', 'button');
+  tr.setAttribute('aria-label', `Open job summary for ${r.jobType}`);
+
+  const windowCell = scheduledScreen
+    ? `<td class="mono">${esc(formatWindowTimeRange(r.scheduledStart, r.scheduledEnd))}</td>`
+    : '';
+
+  tr.innerHTML = `
+    <td class="job">${esc(r.jobType)}
+      <span class="sub"><span class="pill ${URG_CLASS[r.urgency]}">${URG_LABEL[r.urgency]} urgency</span></span>
+    </td>
+    ${windowCell}
+    <td>${esc(r.partOfHouse)}</td>
+    <td class="mono">${r.inScope === false ? '<span class="missing">N/A</span>' : r.laborMin + '-' + r.laborMax + ' hrs'}</td>
+    <td>${r.name ? esc(r.name) : '<span class="missing">Not provided</span>'}</td>
+    <td class="mono">${r.phone ? esc(r.phone) : '<span class="missing">Not provided</span>'}</td>
+    <td class="mono">${r.email ? esc(r.email) : '<span class="missing">Not provided</span>'}</td>
+  `;
+
+  tr.addEventListener('click', () => openDetail(r.id));
+  tr.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openDetail(r.id);
+    }
+  });
+
+  return tr;
+}
+
+
+// Build the non-interactive day-group header row, with the day's job count and cap usage.
+function buildDayRow(date, jobs, colSpan) {
+  const tr = document.createElement('tr');
+  tr.className = 'day-row';
+  tr.innerHTML = `<td colspan="${colSpan}">${esc(formatDayHeader(date, jobs.length))}</td>`;
+  return tr;
+}
+
+
 function renderRows(list) {
-  const URGENCY_RANK = { high: 0, medium: 1, low: 2 };
-  const URG_LABEL = { high: 'High', medium: 'Medium', low: 'Low' };
-  const URG_CLASS = { high: 'high', medium: 'med', low: 'low' };
-
-  const sorted = [...list].sort((a, b) =>
-    URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency]
-  );
-
   const tbody = document.getElementById('rows');
   tbody.innerHTML = '';
 
-  sorted.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.className = 'u-' + URG_CLASS[r.urgency];
-    tr.tabIndex = 0;
-    tr.setAttribute('role', 'button');
-    tr.setAttribute('aria-label', `Open job summary for ${r.jobType}`);
+  const scheduledScreen = appState.currentScreen === 'scheduled';
+  updateRowsHead(scheduledScreen);
 
-    tr.innerHTML = `
-      <td class="job">${esc(r.jobType)}
-        <span class="sub"><span class="pill ${URG_CLASS[r.urgency]}">${URG_LABEL[r.urgency]} urgency</span></span>
-      </td>
-      <td>${esc(r.partOfHouse)}</td>
-      <td class="mono">${r.inScope === false ? '<span class="missing">N/A</span>' : r.laborMin + '-' + r.laborMax + ' hrs'}</td>
-      <td>${r.name ? esc(r.name) : '<span class="missing">Not provided</span>'}</td>
-      <td class="mono">${r.phone ? esc(r.phone) : '<span class="missing">Not provided</span>'}</td>
-      <td class="mono">${r.email ? esc(r.email) : '<span class="missing">Not provided</span>'}</td>
-    `;
+  if (!scheduledScreen) {
+    const sorted = [...list].sort((a, b) =>
+      URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency]
+    );
+    sorted.forEach(r => tbody.appendChild(buildJobRow(r, false)));
+    return;
+  }
 
-    tr.addEventListener('click', () => openDetail(r.id));
-    tr.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        openDetail(r.id);
-      }
-    });
-
-    tbody.appendChild(tr);
+  // Scheduled screen: group rows by calendar day, each day sorted by start time.
+  const colSpan = 7;
+  const days = new Map();
+  list.forEach(r => {
+    const key = new Date(r.scheduledStart).toDateString();
+    if (!days.has(key)) days.set(key, { date: new Date(r.scheduledStart), jobs: [] });
+    days.get(key).jobs.push(r);
   });
+
+  [...days.values()]
+    .sort((a, b) => a.date - b.date)
+    .forEach(group => {
+      group.jobs.sort((a, b) => new Date(a.scheduledStart) - new Date(b.scheduledStart));
+      tbody.appendChild(buildDayRow(group.date, group.jobs, colSpan));
+      group.jobs.forEach(r => tbody.appendChild(buildJobRow(r, true)));
+    });
 }
 
 
@@ -1123,6 +1248,32 @@ function formatDuration(startIso, endIso) {
   if (!startIso || !endIso) return '';
   const hrs = (new Date(endIso) - new Date(startIso)) / 3600000;
   return `${hrs % 1 === 0 ? hrs : hrs.toFixed(1)} hours`;
+}
+
+
+// "9:00 AM to 11:30 AM" style time range for the Scheduled screen's table column.
+function formatWindowTimeRange(startIso, endIso) {
+  if (!startIso || !endIso) return '';
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const startTime = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const endTime = end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${startTime} to ${endTime}`;
+}
+
+
+// Round a number to one decimal place, dropping the decimal when it is whole.
+function fmtHours(h) {
+  return h % 1 === 0 ? String(h) : h.toFixed(1);
+}
+
+
+// "Mon, Jun 23: 3 jobs, 6.5 / 8.5 hrs" style header for a day's group of scheduled jobs.
+function formatDayHeader(date, jobCount) {
+  const dayLabel = date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const usedHours = dayScheduledMinutes(date) / 60;
+  const capHours = appState.settings.dailyCapHours;
+  return `${dayLabel}: ${jobCount} job${jobCount > 1 ? 's' : ''}, ${fmtHours(usedHours)} / ${fmtHours(capHours)} hrs`;
 }
 
 
