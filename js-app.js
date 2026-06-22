@@ -11,10 +11,24 @@ let appState = {
     businessName: 'Your Electric Company',
     baseAddress: '',
     baseCoordinates: null,
-    businessHours: '8:00 AM - 5:00 PM'
+    businessHours: '8:00 AM - 5:00 PM',
+    businessStartHour: 8,
+    businessEndHour: 17,
+    dailyCapHours: 8.5,
+    lunchEnabled: false,
+    lunchStart: '12:00',
+    lunchEnd: '13:00'
   },
-  calendar: []
+  calendar: [],
+  currentScreen: 'overview'
 };
+
+
+// Spacing and travel constants (buffer and lunch are excluded from the daily cap)
+const BUFFER_MINUTES = 15;
+const SCHEDULE_HORIZON_DAYS = 14;
+const SLOT_GRANULARITY_MINUTES = 15;
+const PLACEHOLDER_WINDOW_HOURS = 1;
 
 
 // ============ INITIALIZATION ============
@@ -26,10 +40,19 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
+// Tracks the open detail page so Back and settings re-render can return correctly.
+let currentDetailId = null;
+let detailOriginScreen = 'overview';
+// The job currently being scheduled in the schedule modal.
+let schedulingJobId = null;
+
+
 function initializeEventListeners() {
   document.getElementById('baseChip').addEventListener('click', () => openModal('settingsModal'));
   document.getElementById('importBtn').addEventListener('click', () => openModal('importModal'));
   document.getElementById('exportBtn').addEventListener('click', exportData);
+  document.getElementById('screenToggle').addEventListener('click', toggleScreen);
+  document.getElementById('schedSuggestBtn').addEventListener('click', applySuggestedWindow);
 }
 
 
@@ -39,7 +62,19 @@ function loadSettings() {
   if (saved) {
     appState.settings = { ...appState.settings, ...JSON.parse(saved) };
   }
+  // Coerce numeric settings so older saves (or hand-edited values) behave.
+  appState.settings.businessStartHour = numOr(appState.settings.businessStartHour, 8);
+  appState.settings.businessEndHour = numOr(appState.settings.businessEndHour, 17);
+  appState.settings.dailyCapHours = numOr(appState.settings.dailyCapHours, 8.5);
+  appState.settings.lunchEnabled = !!appState.settings.lunchEnabled;
   updateBaseLabel();
+}
+
+
+// Parse a value to a finite number, falling back to a default.
+function numOr(v, fallback) {
+  const n = parseFloat(v);
+  return isFinite(n) ? n : fallback;
 }
 
 
@@ -47,8 +82,52 @@ function saveSettings() {
   const businessName = document.getElementById('businessName').value;
   const baseAddress = document.getElementById('baseAddress').value;
 
+  // Read and validate the scheduling inputs before committing anything.
+  const startHour = timeStrToHour(document.getElementById('businessStart').value);
+  const endHour = timeStrToHour(document.getElementById('businessEnd').value);
+  const cap = numOr(document.getElementById('dailyCap').value, NaN);
+  const lunchEnabled = document.getElementById('lunchEnabled').checked;
+  const lunchStart = document.getElementById('lunchStart').value;
+  const lunchEnd = document.getElementById('lunchEnd').value;
+
+  if (startHour === null || endHour === null || endHour <= startHour) {
+    alert('Business hours are invalid: the end time must be after the start time.');
+    return;
+  }
+  if (!isFinite(cap) || cap <= 0) {
+    alert('Daily work cap must be a number greater than 0.');
+    return;
+  }
+  let lunchHours = 0;
+  if (lunchEnabled) {
+    const ls = timeStrToHour(lunchStart);
+    const le = timeStrToHour(lunchEnd);
+    if (ls === null || le === null || le <= ls) {
+      alert('Lunch break is invalid: the end time must be after the start time.');
+      return;
+    }
+    lunchHours = le - ls;
+  }
+  // The cap plus a blocked lunch can never exceed the business hours window,
+  // since lunch and the cap's work activity both have to fit inside it.
+  const operatingHours = endHour - startHour;
+  if (cap + lunchHours > operatingHours) {
+    if (lunchEnabled) {
+      alert(`Daily work cap (${cap}h) plus the lunch break (${lunchHours}h) cannot exceed business hours (${operatingHours}h). Reduce the cap or shorten lunch.`);
+    } else {
+      alert(`Daily work cap (${cap}h) cannot exceed business hours (${operatingHours}h).`);
+    }
+    return;
+  }
+
   appState.settings.businessName = businessName || appState.settings.businessName;
   appState.settings.baseAddress = baseAddress || appState.settings.baseAddress;
+  appState.settings.businessStartHour = startHour;
+  appState.settings.businessEndHour = endHour;
+  appState.settings.dailyCapHours = cap;
+  appState.settings.lunchEnabled = lunchEnabled;
+  appState.settings.lunchStart = lunchStart;
+  appState.settings.lunchEnd = lunchEnd;
 
   // Geocode address (simplified - in production use a real geocoding API)
   if (baseAddress) {
@@ -59,9 +138,11 @@ function saveSettings() {
   updateBaseLabel();
   closeModal('settingsModal');
 
-  // Recalculate distances if we have requests
-  if (appState.requests.length > 0) {
-    updateUI();
+  // Re-render the current screen, and refresh the detail page if one is open so
+  // the legacy "next available" insights reflect the new hours.
+  updateUI();
+  if (currentDetailId !== null && !document.getElementById('detail').classList.contains('hidden')) {
+    openDetail(currentDetailId);
   }
 }
 
@@ -73,6 +154,30 @@ function updateBaseLabel() {
   // Pre-fill settings modal
   document.getElementById('businessName').value = appState.settings.businessName;
   document.getElementById('baseAddress').value = appState.settings.baseAddress;
+  document.getElementById('businessStart').value = hourToTimeStr(appState.settings.businessStartHour);
+  document.getElementById('businessEnd').value = hourToTimeStr(appState.settings.businessEndHour);
+  document.getElementById('dailyCap').value = appState.settings.dailyCapHours;
+  document.getElementById('lunchEnabled').checked = !!appState.settings.lunchEnabled;
+  document.getElementById('lunchStart').value = appState.settings.lunchStart;
+  document.getElementById('lunchEnd').value = appState.settings.lunchEnd;
+}
+
+
+// Convert an hour number (8, 17, 8.5) into an "HH:MM" string for time inputs.
+function hourToTimeStr(hour) {
+  const h = Math.floor(hour);
+  const min = Math.round((hour - h) * 60);
+  return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+}
+
+
+// Convert an "HH:MM" string into a fractional hour number (8.5 for "08:30").
+function timeStrToHour(str) {
+  const parts = String(str || '').split(':');
+  const h = parseInt(parts[0], 10);
+  const min = parseInt(parts[1], 10);
+  if (!isFinite(h)) return null;
+  return h + (isFinite(min) ? min : 0) / 60;
 }
 
 
@@ -81,6 +186,12 @@ function loadData() {
   const saved = localStorage.getItem('electrician_requests');
   if (saved) {
     appState.requests = JSON.parse(saved);
+    // Normalize older saved jobs that predate the scheduling fields.
+    appState.requests.forEach(req => {
+      if (typeof req.scheduled !== 'boolean') req.scheduled = false;
+      if (req.scheduledStart === undefined) req.scheduledStart = null;
+      if (req.scheduledEnd === undefined) req.scheduledEnd = null;
+    });
   }
 }
 
@@ -145,7 +256,10 @@ function parseCSV(csv) {
       phone: phoneIdx >= 0 ? values[phoneIdx]?.trim() : '',
       email: emailIdx >= 0 ? values[emailIdx]?.trim() : '',
       address: addressIdx >= 0 ? values[addressIdx]?.trim() : '',
-      message: messageIdx >= 0 ? values[messageIdx]?.trim() : ''
+      message: messageIdx >= 0 ? values[messageIdx]?.trim() : '',
+      scheduled: false,
+      scheduledStart: null,
+      scheduledEnd: null
     };
 
     // Run inference engine
@@ -237,25 +351,87 @@ function exportData() {
 
 
 // ============ UI RENDERING ============
-function updateUI() {
-  if (appState.requests.length === 0) {
-    document.getElementById('emptyState').classList.remove('hidden');
-    document.getElementById('dataView').classList.add('hidden');
-  } else {
-    document.getElementById('emptyState').classList.add('hidden');
-    document.getElementById('dataView').classList.remove('hidden');
-    renderSummary();
-    renderRows();
-  }
+// The jobs shown on the active screen: unscheduled on Overview, scheduled on Scheduled.
+function currentList() {
+  return appState.requests.filter(r =>
+    appState.currentScreen === 'scheduled' ? r.scheduled === true : r.scheduled !== true
+  );
 }
 
 
-function renderSummary() {
+function updateUI() {
+  const emptyState = document.getElementById('emptyState');
+  const emptyStateAlt = document.getElementById('emptyStateAlt');
+  const dataView = document.getElementById('dataView');
+
+  applyScreenChrome();
+
+  if (appState.requests.length === 0) {
+    // No imported jobs at all: show the original import-prompt empty state.
+    emptyState.classList.remove('hidden');
+    emptyStateAlt.classList.add('hidden');
+    dataView.classList.add('hidden');
+    return;
+  }
+
+  const list = currentList();
+  if (list.length === 0) {
+    // Jobs exist, but none on this screen: show the screen-specific empty state.
+    emptyState.classList.add('hidden');
+    dataView.classList.add('hidden');
+    setAltEmptyState();
+    emptyStateAlt.classList.remove('hidden');
+    return;
+  }
+
+  emptyState.classList.add('hidden');
+  emptyStateAlt.classList.add('hidden');
+  dataView.classList.remove('hidden');
+  renderSummary(list);
+  renderRows(list);
+}
+
+
+// Update the eyebrow, title, lede, and toggle label for the active screen.
+function applyScreenChrome() {
+  const scheduled = appState.currentScreen === 'scheduled';
+  document.getElementById('ovEyebrow').textContent =
+    scheduled ? 'Scheduled services' : 'Service requests overview';
+  document.getElementById('ovTitle').textContent =
+    scheduled ? 'Scheduled services' : 'Incoming service requests';
+  document.getElementById('ovLede').textContent =
+    scheduled
+      ? 'Booked jobs with a confirmed window. Select any row to open the full job summary.'
+      : 'Sorted by urgency. Select any row to open the full job summary.';
+  document.getElementById('screenToggle').textContent =
+    scheduled ? 'View incoming requests' : 'View scheduled services';
+}
+
+
+// Fill the screen-specific empty state text for the active screen.
+function setAltEmptyState() {
+  const scheduled = appState.currentScreen === 'scheduled';
+  document.getElementById('emptyStateAltHeading').textContent =
+    scheduled ? 'No scheduled services yet' : 'No incoming requests';
+  document.getElementById('emptyStateAltText').textContent =
+    scheduled
+      ? 'Open a request from the overview and schedule it to see it here.'
+      : 'Every request has been scheduled. Switch to scheduled services to view them.';
+}
+
+
+function toggleScreen() {
+  appState.currentScreen = appState.currentScreen === 'scheduled' ? 'overview' : 'scheduled';
+  updateUI();
+}
+
+
+function renderSummary(list) {
   const counts = { high: 0, medium: 0, low: 0 };
-  appState.requests.forEach(r => counts[r.urgency]++);
+  list.forEach(r => counts[r.urgency]++);
 
   document.getElementById('summary').innerHTML = `
-    <div class="stat"><div class="n">${appState.requests.length}</div><div class="l">Total requests</div></div>
+    <div class="stat"><div class="n">${list.length}</div><div class="l">Total requests</div></div>
     <div class="stat"><div class="n">${counts.high}</div><div class="l"><span class="dot high"></span>High urgency</div></div>
     <div class="stat"><div class="n">${counts.medium}</div><div class="l"><span class="dot med"></span>Medium urgency</div></div>
     <div class="stat"><div class="n">${counts.low}</div><div class="l"><span class="dot low"></span>Low urgency</div></div>
@@ -263,12 +439,12 @@ function renderSummary() {
 }
 
 
-function renderRows() {
+function renderRows(list) {
   const URGENCY_RANK = { high: 0, medium: 1, low: 2 };
   const URG_LABEL = { high: 'High', medium: 'Medium', low: 'Low' };
   const URG_CLASS = { high: 'high', medium: 'med', low: 'low' };
 
-  const sorted = [...appState.requests].sort((a, b) =>
+  const sorted = [...list].sort((a, b) =>
     URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency]
   );
 
@@ -310,6 +486,10 @@ function renderRows() {
 function openDetail(id) {
   const r = appState.requests.find(x => x.id === id);
   if (!r) return;
+
+  // Remember where we came from so Back returns to the right screen.
+  currentDetailId = id;
+  detailOriginScreen = appState.currentScreen;
 
   const out = (r.inScope === false);
   const _mats = Array.isArray(r.materials) ? r.materials : [];
@@ -368,10 +548,27 @@ function openDetail(id) {
        </div>`
     : `<p class="missing" style="margin:4px 0 0">Address not provided. Collect it to estimate distance and drive time.</p>`;
 
+  // Schedule area: differs for unscheduled versus scheduled jobs.
+  const scheduleArea = r.scheduled
+    ? `<div class="card" style="margin-bottom:18px">
+         <p class="block-label" style="margin-top:0">Scheduled window</p>
+         <p style="font-size:1rem;font-weight:600;margin:0 0 4px">${esc(formatWindowSummary(r.scheduledStart, r.scheduledEnd))}</p>
+         <p style="font-size:.85rem;color:var(--muted);margin:0 0 14px">Duration: ${esc(formatDuration(r.scheduledStart, r.scheduledEnd))}</p>
+         <div style="display:flex;gap:10px;flex-wrap:wrap">
+           <button class="btn btn-primary" onclick="openScheduleModal(${JSON.stringify(r.id)})">Reschedule</button>
+           <button class="btn btn-secondary" onclick="unscheduleJob(${JSON.stringify(r.id)})">Unschedule</button>
+         </div>
+       </div>`
+    : `<div class="card" style="margin-bottom:18px">
+         <p class="block-label" style="margin-top:0">Scheduling</p>
+         <p style="font-size:.9rem;color:var(--ink-soft);margin:0 0 14px">Not scheduled yet.</p>
+         <button class="btn btn-primary" onclick="openScheduleModal(${JSON.stringify(r.id)})">Schedule</button>
+       </div>`;
+
   document.getElementById('detail').innerHTML = `
     <button class="back" id="backBtn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      Back to all requests
+      ${detailOriginScreen === 'scheduled' ? 'Back to scheduled services' : 'Back to all requests'}
     </button>
 
 
@@ -383,6 +580,9 @@ function openDetail(id) {
       </div>
       <span class="pill ${uc}" style="font-size:.82rem;padding:6px 14px">${urgLabel} urgency</span>
     </div>
+
+
+    ${scheduleArea}
 
 
     <div class="grid">
@@ -444,9 +644,20 @@ function openDetail(id) {
     </div>
   `;
 
-  document.getElementById('backBtn').addEventListener('click', showOverview);
+  document.getElementById('backBtn').addEventListener('click', backToList);
   document.getElementById('overview').classList.add('hidden');
   document.getElementById('detail').classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+
+// Return from a detail page to whichever screen it was opened from.
+function backToList() {
+  appState.currentScreen = detailOriginScreen;
+  currentDetailId = null;
+  document.getElementById('detail').classList.add('hidden');
+  document.getElementById('overview').classList.remove('hidden');
+  updateUI();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -460,24 +671,29 @@ function openNearbyJob(requestId, event) {
 }
 
 
-function showOverview() {
-  document.getElementById('detail').classList.add('hidden');
-  document.getElementById('overview').classList.remove('hidden');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-
 // ============ CALENDAR & SCHEDULING ============
-const BUSINESS_START = 8, BUSINESS_END = 17;
-const LUNCH_START = 12, LUNCH_END = 13;
-
-
 function atDay(offset, hour, min) {
   const d = new Date();
   d.setDate(d.getDate() + offset);
   d.setHours(hour, min || 0, 0, 0);
   return d;
 }
+
+
+// A specific day offset at a fractional hour (8.5 becomes 08:30).
+function atDayFrac(offset, fractionalHour) {
+  const h = Math.floor(fractionalHour);
+  const min = Math.round((fractionalHour - h) * 60);
+  return atDay(offset, h, min);
+}
+
+
+// Business hours and lunch, read live from settings so the whole app agrees.
+function bizStartHour() { return appState.settings.businessStartHour; }
+function bizEndHour() { return appState.settings.businessEndHour; }
+function lunchActive() { return !!appState.settings.lunchEnabled; }
+function lunchStartHour() { return timeStrToHour(appState.settings.lunchStart); }
+function lunchEndHour() { return timeStrToHour(appState.settings.lunchEnd); }
 
 
 // Mock calendar - used for "next available" scheduling slots only
@@ -505,15 +721,18 @@ function nextAvailable(durationHrs, count) {
   const needMs = durationHrs * 3600 * 1000;
   let cursor = new Date();
   cursor.setMinutes(0, 0, 0);
-  if (cursor.getHours() < BUSINESS_START) cursor.setHours(BUSINESS_START, 0, 0, 0);
+  if (cursor.getHours() < bizStartHour()) cursor.setHours(Math.floor(bizStartHour()), 0, 0, 0);
 
   for (let day = 0; day < 14 && slots.length < count; day++) {
-    const dayStart = atDay(day, BUSINESS_START, 0);
-    const dayEnd = atDay(day, BUSINESS_END, 0);
+    const dayStart = atDayFrac(day, bizStartHour());
+    const dayEnd = atDayFrac(day, bizEndHour());
     const dow = dayStart.getDay();
     if (dow === 0 || dow === 6) continue;
 
-    const busy = [{ start: atDay(day, LUNCH_START, 0), end: atDay(day, LUNCH_END, 0) }];
+    // Only block lunch when the setting is on.
+    const busy = lunchActive()
+      ? [{ start: atDayFrac(day, lunchStartHour()), end: atDayFrac(day, lunchEndHour()) }]
+      : [];
     CALENDAR.forEach(c => {
       if (c.start.toDateString() === dayStart.toDateString()) busy.push({ start: c.start, end: c.end });
     });
@@ -539,6 +758,371 @@ function fmtSlot(d) {
   const day = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
   const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   return `${day}, ${time}`;
+}
+
+
+// ============ JOB SCHEDULING (Scheduled Services screen) ============
+
+// Point-to-point travel time between two jobs (mirrors distanceAndEta, which is base-to-point).
+function travelMinutesBetween(aPoint, bPoint) {
+  if (!aPoint || !bPoint) return 0;
+  const straight = straightLineMiles(aPoint, bPoint);
+  const roadMiles = straight * 1.3;
+  return Math.max(4, Math.round(roadMiles / 32 * 60));
+}
+
+
+// The scheduled job whose window ends most recently before candidateStart, or null.
+function previousJobBefore(candidateStart) {
+  let best = null;
+  appState.requests.forEach(job => {
+    if (!job.scheduled || !job.scheduledEnd) return;
+    const end = new Date(job.scheduledEnd);
+    if (end <= candidateStart && (!best || end > new Date(best.scheduledEnd))) {
+      best = job;
+    }
+  });
+  return best;
+}
+
+
+// Window length in hours for a job's service time: labor midpoint, or a placeholder
+// when out of scope or zero-labor.
+function laborMidHours(job) {
+  if (job.inScope === false || !job.laborMin || !job.laborMax) return PLACEHOLDER_WINDOW_HOURS;
+  const mid = (job.laborMin + job.laborMax) / 2;
+  return mid > 0 ? mid : PLACEHOLDER_WINDOW_HOURS;
+}
+
+
+// Sum of scheduled job window lengths (service plus travel; excludes buffer and lunch)
+// for all jobs scheduled on the same calendar day as dateLike.
+function dayScheduledMinutes(dateLike) {
+  const target = new Date(dateLike).toDateString();
+  let total = 0;
+  appState.requests.forEach(job => {
+    if (!job.scheduled || !job.scheduledStart || !job.scheduledEnd) return;
+    const start = new Date(job.scheduledStart);
+    if (start.toDateString() !== target) return;
+    total += (new Date(job.scheduledEnd) - start) / 60000;
+  });
+  return total;
+}
+
+
+// Round a date up to the next slot boundary (15 minutes).
+function roundUpToSlot(date) {
+  const ms = SLOT_GRANULARITY_MINUTES * 60 * 1000;
+  return new Date(Math.ceil(date.getTime() / ms) * ms);
+}
+
+
+// True if [aStart, aEnd) overlaps [bStart, bEnd).
+function rangesOverlap(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+
+// Scan the schedule horizon for the earliest window that fits this job's required length,
+// inside business hours, routed around other scheduled jobs (with buffer) and lunch (if
+// enabled), without busting the daily cap. Returns { start, end } or null.
+function proposeWindow(job) {
+  const lengthHours = laborMidHours(job);
+  const lengthMs = lengthHours * 3600 * 1000;
+  const bufferMs = BUFFER_MINUTES * 60 * 1000;
+  const capMinutes = appState.settings.dailyCapHours * 60;
+
+  for (let day = 0; day < SCHEDULE_HORIZON_DAYS; day++) {
+    const dayStart = atDayFrac(day, bizStartHour());
+    const dayEnd = atDayFrac(day, bizEndHour());
+    const dow = dayStart.getDay();
+    if (dow === 0 || dow === 6) continue;
+
+    // Busy windows to route around: other scheduled jobs (with buffer) and lunch.
+    const busy = [];
+    if (lunchActive()) {
+      busy.push({ start: atDayFrac(day, lunchStartHour()), end: atDayFrac(day, lunchEndHour()) });
+    }
+    appState.requests.forEach(other => {
+      if (other.id === job.id || !other.scheduled || !other.scheduledStart || !other.scheduledEnd) return;
+      const s = new Date(other.scheduledStart);
+      if (s.toDateString() !== dayStart.toDateString()) return;
+      busy.push({
+        start: new Date(new Date(other.scheduledStart).getTime() - bufferMs),
+        end: new Date(new Date(other.scheduledEnd).getTime() + bufferMs)
+      });
+    });
+    busy.sort((a, b) => a.start - b.start);
+
+    let candidate = roundUpToSlot(new Date(Math.max(dayStart, day === 0 ? new Date() : dayStart)));
+    if (candidate < dayStart) candidate = dayStart;
+
+    // Walk forward past each busy window, then try to fit before the day ends.
+    for (const b of busy) {
+      if (candidate < b.start) {
+        const prev = previousJobBefore(candidate);
+        const travelMs = prev && prev.point && job.point ? travelMinutesBetween(prev.point, job.point) * 60 * 1000 : 0;
+        const windowEnd = new Date(candidate.getTime() + lengthMs + travelMs);
+        const usedMinutes = dayScheduledMinutes(candidate) + (lengthMs + travelMs) / 60000;
+        if (windowEnd <= b.start && windowEnd <= dayEnd && usedMinutes <= capMinutes) {
+          return { start: candidate, end: windowEnd };
+        }
+      }
+      if (b.end > candidate) candidate = roundUpToSlot(b.end);
+    }
+
+    const prev = previousJobBefore(candidate);
+    const travelMs = prev && prev.point && job.point ? travelMinutesBetween(prev.point, job.point) * 60 * 1000 : 0;
+    const windowEnd = new Date(candidate.getTime() + lengthMs + travelMs);
+    const usedMinutes = dayScheduledMinutes(candidate) + (lengthMs + travelMs) / 60000;
+    if (candidate >= dayStart && windowEnd <= dayEnd && usedMinutes <= capMinutes) {
+      return { start: candidate, end: windowEnd };
+    }
+  }
+  return null;
+}
+
+
+// Hard errors block confirm; soft warnings allow override.
+function evaluateWindow(job, start, end) {
+  const errors = [];
+  const warnings = [];
+
+  if (!(start instanceof Date) || !(end instanceof Date) || isNaN(start) || isNaN(end)) {
+    errors.push('Start and end must be valid dates.');
+    return { errors, warnings };
+  }
+  if (end <= start) {
+    errors.push('End must be after start.');
+    return { errors, warnings };
+  }
+
+  const dow = start.getDay();
+  if (dow === 0 || dow === 6) warnings.push('This falls on a weekend.');
+
+  const dayStart = atDayFracOnDate(start, bizStartHour());
+  const dayEnd = atDayFracOnDate(start, bizEndHour());
+  if (start < dayStart || end > dayEnd) warnings.push('This window falls outside business hours.');
+
+  if (lunchActive()) {
+    const lunchS = atDayFracOnDate(start, lunchStartHour());
+    const lunchE = atDayFracOnDate(start, lunchEndHour());
+    if (rangesOverlap(start, end, lunchS, lunchE)) warnings.push('This window overlaps the lunch block.');
+  }
+
+  const bufferMs = BUFFER_MINUTES * 60 * 1000;
+  appState.requests.forEach(other => {
+    if (other.id === job.id || !other.scheduled || !other.scheduledStart || !other.scheduledEnd) return;
+    const oStart = new Date(other.scheduledStart);
+    const oEnd = new Date(other.scheduledEnd);
+    if (rangesOverlap(start, end, oStart, oEnd)) {
+      warnings.push(`This window overlaps another scheduled job (${esc(other.jobType)}).`);
+    } else if (rangesOverlap(start, end, new Date(oStart.getTime() - bufferMs), new Date(oEnd.getTime() + bufferMs))) {
+      warnings.push(`This window leaves less than the ${BUFFER_MINUTES} minute buffer around another scheduled job (${esc(other.jobType)}).`);
+    }
+  });
+
+  const existingMinutes = dayScheduledMinutes(start) - currentJobMinutesOnDay(job, start);
+  const thisMinutes = (end - start) / 60000;
+  const capMinutes = appState.settings.dailyCapHours * 60;
+  if (existingMinutes + thisMinutes > capMinutes) warnings.push('This window pushes the day over the daily work cap.');
+
+  return { errors, warnings };
+}
+
+
+// Minutes this job currently contributes to its own scheduled day (excluded when
+// re-evaluating an edit so the job is not double counted against the cap).
+function currentJobMinutesOnDay(job, dateLike) {
+  if (!job.scheduled || !job.scheduledStart || !job.scheduledEnd) return 0;
+  const start = new Date(job.scheduledStart);
+  if (start.toDateString() !== new Date(dateLike).toDateString()) return 0;
+  return (new Date(job.scheduledEnd) - start) / 60000;
+}
+
+
+// Same as atDayFrac, but anchored to the calendar day of a given date rather than an offset.
+function atDayFracOnDate(date, fractionalHour) {
+  const h = Math.floor(fractionalHour);
+  const min = Math.round((fractionalHour - h) * 60);
+  const d = new Date(date);
+  d.setHours(h, min, 0, 0);
+  return d;
+}
+
+
+// ---------- Schedule modal ----------
+
+function openScheduleModal(id) {
+  const job = appState.requests.find(x => x.id === id);
+  if (!job) return;
+  schedulingJobId = id;
+
+  document.getElementById('schedTitle').textContent = job.scheduled ? 'Reschedule service' : 'Schedule service';
+
+  const proposed = proposeWindow(job);
+  if (proposed) {
+    document.getElementById('schedRationale').textContent =
+      `Suggested window: ${formatWindowSummary(proposed.start, proposed.end)}. Adjust the fields below or use the suggestion as-is.`;
+  } else {
+    document.getElementById('schedRationale').textContent =
+      `No open window was found in the next ${SCHEDULE_HORIZON_DAYS} days. Enter a window by hand below.`;
+  }
+
+  const startInput = document.getElementById('schedStart');
+  const endInput = document.getElementById('schedEnd');
+  if (job.scheduled && job.scheduledStart && job.scheduledEnd) {
+    startInput.value = toDatetimeLocalValue(new Date(job.scheduledStart));
+    endInput.value = toDatetimeLocalValue(new Date(job.scheduledEnd));
+  } else if (proposed) {
+    startInput.value = toDatetimeLocalValue(proposed.start);
+    endInput.value = toDatetimeLocalValue(proposed.end);
+  } else {
+    startInput.value = '';
+    endInput.value = '';
+  }
+
+  document.getElementById('schedSuggestBtn').classList.toggle('hidden', !proposed);
+  refreshScheduleWarnings();
+  openModal('scheduleModal');
+}
+
+
+// Fill in the suggested window when the user clicks "Use suggested window".
+function applySuggestedWindow() {
+  const job = appState.requests.find(x => x.id === schedulingJobId);
+  if (!job) return;
+  const proposed = proposeWindow(job);
+  if (!proposed) return;
+  document.getElementById('schedStart').value = toDatetimeLocalValue(proposed.start);
+  document.getElementById('schedEnd').value = toDatetimeLocalValue(proposed.end);
+  refreshScheduleWarnings();
+}
+
+
+// When the start changes, recompute the end so the window keeps the job's required length.
+function onScheduleStartChange() {
+  const job = appState.requests.find(x => x.id === schedulingJobId);
+  if (!job) return;
+  const startVal = document.getElementById('schedStart').value;
+  if (!startVal) return;
+  const start = new Date(startVal);
+  if (isNaN(start)) return;
+
+  const lengthHours = laborMidHours(job);
+  const prev = previousJobBefore(start);
+  const travelMin = prev && prev.point && job.point ? travelMinutesBetween(prev.point, job.point) : 0;
+  const end = new Date(start.getTime() + (lengthHours * 60 + travelMin) * 60 * 1000);
+  document.getElementById('schedEnd').value = toDatetimeLocalValue(end);
+  refreshScheduleWarnings();
+}
+
+
+// Re-run evaluateWindow against the current form values and render errors/warnings.
+function refreshScheduleWarnings() {
+  const job = appState.requests.find(x => x.id === schedulingJobId);
+  const warnEl = document.getElementById('schedWarn');
+  const confirmBtn = document.getElementById('schedConfirmBtn');
+  if (!job) { warnEl.innerHTML = ''; return; }
+
+  const startVal = document.getElementById('schedStart').value;
+  const endVal = document.getElementById('schedEnd').value;
+  if (!startVal || !endVal) {
+    warnEl.innerHTML = '';
+    confirmBtn.disabled = false;
+    return;
+  }
+
+  const { errors, warnings } = evaluateWindow(job, new Date(startVal), new Date(endVal));
+  const items = [
+    ...errors.map(e => `<li style="color:var(--high)">${esc(e)}</li>`),
+    ...warnings.map(w => `<li style="color:var(--med)">${esc(w)}</li>`)
+  ];
+  warnEl.innerHTML = items.length
+    ? `<ul style="list-style:none;margin:0;padding:0;font-size:.84rem;display:flex;flex-direction:column;gap:4px">${items.join('')}</ul>`
+    : '';
+  confirmBtn.disabled = errors.length > 0;
+}
+
+
+// Commit the chosen window: mark the job scheduled and move it to the Scheduled screen.
+function confirmSchedule() {
+  const job = appState.requests.find(x => x.id === schedulingJobId);
+  if (!job) return;
+
+  const startVal = document.getElementById('schedStart').value;
+  const endVal = document.getElementById('schedEnd').value;
+  if (!startVal || !endVal) {
+    alert('Enter a start and end time before confirming.');
+    return;
+  }
+  const start = new Date(startVal);
+  const end = new Date(endVal);
+  const { errors } = evaluateWindow(job, start, end);
+  if (errors.length > 0) {
+    alert(errors.join(' '));
+    return;
+  }
+
+  job.scheduled = true;
+  job.scheduledStart = start.toISOString();
+  job.scheduledEnd = end.toISOString();
+  saveData();
+  closeModal('scheduleModal');
+
+  appState.currentScreen = 'scheduled';
+  if (currentDetailId === job.id) {
+    openDetail(job.id);
+  } else {
+    updateUI();
+  }
+}
+
+
+// Clear the window and return the job to the Overview screen.
+function unscheduleJob(id) {
+  const job = appState.requests.find(x => x.id === id);
+  if (!job) return;
+  job.scheduled = false;
+  job.scheduledStart = null;
+  job.scheduledEnd = null;
+  saveData();
+
+  appState.currentScreen = 'overview';
+  if (currentDetailId === job.id) {
+    openDetail(job.id);
+  } else {
+    updateUI();
+  }
+}
+
+
+// ---------- Formatting helpers ----------
+
+// Format a Date as the value a datetime-local input expects (local time, no timezone).
+function toDatetimeLocalValue(date) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+
+// "Mon, Jun 23, 9:00 AM to 11:30 AM" style summary for a scheduled window.
+function formatWindowSummary(startIso, endIso) {
+  if (!startIso || !endIso) return 'Not scheduled';
+  const start = new Date(startIso);
+  const end = new Date(endIso);
+  const day = start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const startTime = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const endTime = end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${day}, ${startTime} to ${endTime}`;
+}
+
+
+// "2.5 hours" style duration for a scheduled window.
+function formatDuration(startIso, endIso) {
+  if (!startIso || !endIso) return '';
+  const hrs = (new Date(endIso) - new Date(startIso)) / 3600000;
+  return `${hrs % 1 === 0 ? hrs : hrs.toFixed(1)} hours`;
 }
 
 
