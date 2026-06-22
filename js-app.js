@@ -49,9 +49,23 @@ let schedulingJobId = null;
 
 function initializeEventListeners() {
   document.getElementById('baseChip').addEventListener('click', () => openModal('settingsModal'));
+  document.getElementById('baseChip').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      openModal('settingsModal');
+    }
+  });
   document.getElementById('importBtn').addEventListener('click', () => openModal('importModal'));
   document.getElementById('exportBtn').addEventListener('click', exportData);
-  document.getElementById('screenToggle').addEventListener('click', toggleScreen);
+  document.getElementById('navRequests').addEventListener('click', () => {
+    appState.currentScreen = 'overview';
+    updateUI();
+  });
+  document.getElementById('navScheduled').addEventListener('click', () => {
+    appState.currentScreen = 'scheduled';
+    updateUI();
+  });
+  document.getElementById('navSettings').addEventListener('click', () => openModal('settingsModal'));
   document.getElementById('schedSuggestBtn').addEventListener('click', applySuggestedWindow);
 }
 
@@ -468,7 +482,7 @@ function updateUI() {
 }
 
 
-// Update the eyebrow, title, lede, and toggle label for the active screen.
+// Update the eyebrow, title, lede, and active sidebar nav item for the active screen.
 function applyScreenChrome() {
   const scheduled = appState.currentScreen === 'scheduled';
   document.getElementById('ovEyebrow').textContent =
@@ -477,10 +491,10 @@ function applyScreenChrome() {
     scheduled ? 'Scheduled services' : 'Incoming service requests';
   document.getElementById('ovLede').textContent =
     scheduled
-      ? 'Booked jobs with a confirmed window. Select any row to open the full job summary.'
-      : 'Sorted by urgency. Select any row to open the full job summary.';
-  document.getElementById('screenToggle').textContent =
-    scheduled ? 'View incoming requests' : 'View scheduled services';
+      ? 'Booked jobs with a confirmed window. Select any card to open the full job summary.'
+      : 'Sorted by urgency. Select any card to open the full job summary.';
+  document.getElementById('navRequests').classList.toggle('active', !scheduled);
+  document.getElementById('navScheduled').classList.toggle('active', scheduled);
 }
 
 
@@ -496,100 +510,115 @@ function setAltEmptyState() {
 }
 
 
-function toggleScreen() {
-  appState.currentScreen = appState.currentScreen === 'scheduled' ? 'overview' : 'scheduled';
-  updateUI();
-}
-
-
 function renderSummary(list) {
   const counts = { high: 0, medium: 0, low: 0 };
   list.forEach(r => counts[r.urgency]++);
 
   document.getElementById('summary').innerHTML = `
-    <div class="stat"><div class="n">${list.length}</div><div class="l">Total requests</div></div>
-    <div class="stat"><div class="n">${counts.high}</div><div class="l"><span class="dot high"></span>High urgency</div></div>
-    <div class="stat"><div class="n">${counts.medium}</div><div class="l"><span class="dot med"></span>Medium urgency</div></div>
-    <div class="stat"><div class="n">${counts.low}</div><div class="l"><span class="dot low"></span>Low urgency</div></div>
+    <div class="metric"><div class="n">${list.length}</div><div class="l">Total requests</div></div>
+    <div class="metric high"><div class="n">${counts.high}</div><div class="l">High urgency</div></div>
+    <div class="metric med"><div class="n">${counts.medium}</div><div class="l">Medium urgency</div></div>
+    <div class="metric low"><div class="n">${counts.low}</div><div class="l">Low urgency</div></div>
   `;
 }
 
 
 const URGENCY_RANK = { high: 0, medium: 1, low: 2 };
-const URG_LABEL = { high: 'High', medium: 'Medium', low: 'Low' };
 const URG_CLASS = { high: 'high', medium: 'med', low: 'low' };
 
 
-// Swap the table header to match the active screen's columns.
-function updateRowsHead(scheduledScreen) {
-  document.getElementById('rowsHead').innerHTML = scheduledScreen
-    ? `<th>Job type</th><th>Booked window</th><th>Part of house</th><th>Est. labor</th><th>Customer</th><th>Phone</th><th>Email</th>`
-    : `<th>Job type</th><th>Part of house</th><th>Est. labor</th><th>Customer</th><th>Phone</th><th>Email</th>`;
-}
+// Small inline icons reused inside job cards.
+const ICO_PERSON = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="2"/><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const ICO_PHONE = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 4h3l1.5 4-2 1.5a11 11 0 0 0 5 5l1.5-2 4 1.5v3a1 1 0 0 1-1 1A15 15 0 0 1 4 5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>';
+const ICO_EMAIL = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="1" stroke="currentColor" stroke-width="2"/><path d="M4 6l8 7 8-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICO_CHEVRON = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 
-// Build one clickable job row. Includes the booked-window column when on the Scheduled screen.
-function buildJobRow(r, scheduledScreen) {
-  const tr = document.createElement('tr');
-  tr.className = 'u-' + URG_CLASS[r.urgency];
-  tr.tabIndex = 0;
-  tr.setAttribute('role', 'button');
-  tr.setAttribute('aria-label', `Open job summary for ${r.jobType}`);
+// Build one clickable job card. Shows the booked window prominently when showWindow is set
+// (the Scheduled screen); the urgency-colored left border is always shown.
+function buildJobCard(r, showWindow) {
+  const card = document.createElement('div');
+  card.className = 'job-card ' + URG_CLASS[r.urgency];
+  card.tabIndex = 0;
+  card.setAttribute('role', 'button');
+  card.setAttribute('aria-label', `Open job summary for ${r.jobType}`);
 
-  const windowCell = scheduledScreen
-    ? `<td class="mono">${esc(formatWindowTimeRange(r.scheduledStart, r.scheduledEnd))}</td>`
+  const laborText = r.inScope === false ? 'N/A' : `~${r.laborMin}-${r.laborMax} hrs`;
+  const windowHTML = showWindow
+    ? `<div class="job-card-window">${esc(formatWindowTimeRange(r.scheduledStart, r.scheduledEnd))}</div>`
     : '';
 
-  tr.innerHTML = `
-    <td class="job">${esc(r.jobType)}
-      <span class="sub"><span class="pill ${URG_CLASS[r.urgency]}">${URG_LABEL[r.urgency]} urgency</span></span>
-    </td>
-    ${windowCell}
-    <td>${esc(r.partOfHouse)}</td>
-    <td class="mono">${r.inScope === false ? '<span class="missing">N/A</span>' : r.laborMin + '-' + r.laborMax + ' hrs'}</td>
-    <td>${r.name ? esc(r.name) : '<span class="missing">Not provided</span>'}</td>
-    <td class="mono">${r.phone ? esc(r.phone) : '<span class="missing">Not provided</span>'}</td>
-    <td class="mono">${r.email ? esc(r.email) : '<span class="missing">Not provided</span>'}</td>
+  card.innerHTML = `
+    ${windowHTML}
+    <div class="job-card-title">${esc(r.jobType)}</div>
+    <div class="job-card-meta">${esc(r.partOfHouse)} &middot; ${esc(laborText)}</div>
+    <div class="job-card-rule"></div>
+    <div class="job-card-contacts">
+      <div class="job-card-contact">${ICO_PERSON}${r.name ? esc(r.name) : '<span class="missing">Not provided</span>'}</div>
+      <div class="job-card-contact">${ICO_PHONE}<span class="mono">${r.phone ? esc(r.phone) : '<span class="missing">Not provided</span>'}</span></div>
+      <div class="job-card-contact">${ICO_EMAIL}<span class="mono">${r.email ? esc(r.email) : '<span class="missing">Not provided</span>'}</span></div>
+    </div>
+    <div class="job-card-footer">
+      <button type="button" class="job-card-schedule-btn">${r.scheduled ? 'Reschedule' : 'Schedule'}</button>
+      <span class="job-card-open">Open ${ICO_CHEVRON}</span>
+    </div>
   `;
 
-  tr.addEventListener('click', () => openDetail(r.id));
-  tr.addEventListener('keydown', e => {
+  card.querySelector('.job-card-schedule-btn').addEventListener('click', e => {
+    e.stopPropagation();
+    openScheduleModal(r.id);
+  });
+  card.addEventListener('click', () => openDetail(r.id));
+  card.addEventListener('keydown', e => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       openDetail(r.id);
     }
   });
 
-  return tr;
-}
-
-
-// Build the non-interactive day-group header row, with the day's job count and cap usage.
-function buildDayRow(date, jobs, colSpan) {
-  const tr = document.createElement('tr');
-  tr.className = 'day-row';
-  tr.innerHTML = `<td colspan="${colSpan}">${esc(formatDayHeader(date, jobs.length))}</td>`;
-  return tr;
+  return card;
 }
 
 
 function renderRows(list) {
-  const tbody = document.getElementById('rows');
-  tbody.innerHTML = '';
+  const board = document.getElementById('board');
+  board.innerHTML = '';
 
   const scheduledScreen = appState.currentScreen === 'scheduled';
-  updateRowsHead(scheduledScreen);
 
   if (!scheduledScreen) {
+    board.className = 'board board-urgency';
     const sorted = [...list].sort((a, b) =>
       URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency]
     );
-    sorted.forEach(r => tbody.appendChild(buildJobRow(r, false)));
+    const columns = [
+      { key: 'high', label: 'High urgency' },
+      { key: 'medium', label: 'Medium urgency' },
+      { key: 'low', label: 'Low urgency' }
+    ];
+    columns.forEach(col => {
+      const colJobs = sorted.filter(r => r.urgency === col.key);
+      const colEl = document.createElement('div');
+      colEl.className = 'board-col';
+      const head = document.createElement('div');
+      head.className = 'board-col-head ' + URG_CLASS[col.key];
+      head.innerHTML = `<span class="board-col-title">${col.label}</span><span class="board-col-count">${colJobs.length}</span>`;
+      colEl.appendChild(head);
+      if (colJobs.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'board-col-empty';
+        empty.textContent = 'No requests in this column.';
+        colEl.appendChild(empty);
+      } else {
+        colJobs.forEach(r => colEl.appendChild(buildJobCard(r, false)));
+      }
+      board.appendChild(colEl);
+    });
     return;
   }
 
-  // Scheduled screen: group rows by calendar day, each day sorted by start time.
-  const colSpan = 7;
+  // Scheduled screen: day sections, days ascending, jobs within a day by start time.
+  board.className = 'board board-days';
   const days = new Map();
   list.forEach(r => {
     const key = new Date(r.scheduledStart).toDateString();
@@ -601,8 +630,17 @@ function renderRows(list) {
     .sort((a, b) => a.date - b.date)
     .forEach(group => {
       group.jobs.sort((a, b) => new Date(a.scheduledStart) - new Date(b.scheduledStart));
-      tbody.appendChild(buildDayRow(group.date, group.jobs, colSpan));
-      group.jobs.forEach(r => tbody.appendChild(buildJobRow(r, true)));
+      const section = document.createElement('div');
+      section.className = 'day-section';
+      const head = document.createElement('div');
+      head.className = 'day-section-head';
+      head.textContent = formatDayHeader(group.date, group.jobs.length);
+      const cardsWrap = document.createElement('div');
+      cardsWrap.className = 'day-section-cards';
+      group.jobs.forEach(r => cardsWrap.appendChild(buildJobCard(r, true)));
+      section.appendChild(head);
+      section.appendChild(cardsWrap);
+      board.appendChild(section);
     });
 }
 
@@ -1161,7 +1199,7 @@ function refreshScheduleWarnings() {
   const { errors, warnings } = evaluateWindow(job, new Date(startVal), new Date(endVal));
   const items = [
     ...errors.map(e => `<li style="color:var(--high)">${esc(e)}</li>`),
-    ...warnings.map(w => `<li style="color:var(--med)">${esc(w)}</li>`)
+    ...warnings.map(w => `<li style="color:var(--med-text)">${esc(w)}</li>`)
   ];
   warnEl.innerHTML = items.length
     ? `<ul style="list-style:none;margin:0;padding:0;font-size:.84rem;display:flex;flex-direction:column;gap:4px">${items.join('')}</ul>`
