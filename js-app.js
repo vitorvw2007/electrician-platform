@@ -880,8 +880,8 @@ function nextAvailable(durationHrs, count) {
 
 
 function fmtSlot(d) {
-  const day = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const day = d.toLocaleDateString(DATE_LOCALE, { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString(DATE_LOCALE, { hour: 'numeric', minute: '2-digit' });
   return `${day}, ${time}`;
 }
 
@@ -1231,23 +1231,27 @@ function toDatetimeLocalValue(date) {
 }
 
 
+// Locale fixed to English so weekday and month names never follow the browser/OS locale.
+const DATE_LOCALE = 'en-US';
+
+
 // "Mon, Jun 23, 9:00 AM to 11:30 AM" style summary for a scheduled window.
 function formatWindowSummary(startIso, endIso) {
   if (!startIso || !endIso) return 'Not scheduled';
   const start = new Date(startIso);
   const end = new Date(endIso);
-  const day = start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
-  const startTime = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  const endTime = end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const day = start.toLocaleDateString(DATE_LOCALE, { weekday: 'short', month: 'short', day: 'numeric' });
+  const startTime = start.toLocaleTimeString(DATE_LOCALE, { hour: 'numeric', minute: '2-digit' });
+  const endTime = end.toLocaleTimeString(DATE_LOCALE, { hour: 'numeric', minute: '2-digit' });
   return `${day}, ${startTime} to ${endTime}`;
 }
 
 
-// "2.5 hours" style duration for a scheduled window.
+// "2h30min" style duration for a scheduled window.
 function formatDuration(startIso, endIso) {
   if (!startIso || !endIso) return '';
   const hrs = (new Date(endIso) - new Date(startIso)) / 3600000;
-  return `${hrs % 1 === 0 ? hrs : hrs.toFixed(1)} hours`;
+  return formatHoursMinutes(hrs);
 }
 
 
@@ -1256,24 +1260,27 @@ function formatWindowTimeRange(startIso, endIso) {
   if (!startIso || !endIso) return '';
   const start = new Date(startIso);
   const end = new Date(endIso);
-  const startTime = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  const endTime = end.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const startTime = start.toLocaleTimeString(DATE_LOCALE, { hour: 'numeric', minute: '2-digit' });
+  const endTime = end.toLocaleTimeString(DATE_LOCALE, { hour: 'numeric', minute: '2-digit' });
   return `${startTime} to ${endTime}`;
 }
 
 
-// Round a number to one decimal place, dropping the decimal when it is whole.
-function fmtHours(h) {
-  return h % 1 === 0 ? String(h) : h.toFixed(1);
+// Convert a fractional-hour number into "#h#min" form (e.g. 4.5 becomes "4h30min", 8 becomes "8h").
+function formatHoursMinutes(hours) {
+  const totalMinutes = Math.round(hours * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return m === 0 ? `${h}h` : `${h}h${m}min`;
 }
 
 
-// "Mon, Jun 23: 3 jobs, 6.5 / 8.5 hrs" style header for a day's group of scheduled jobs.
+// "Mon, Jun 23: 3 jobs, 6h30min / 8h30min" style header for a day's group of scheduled jobs.
 function formatDayHeader(date, jobCount) {
-  const dayLabel = date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const dayLabel = date.toLocaleDateString(DATE_LOCALE, { weekday: 'short', month: 'short', day: 'numeric' });
   const usedHours = dayScheduledMinutes(date) / 60;
   const capHours = appState.settings.dailyCapHours;
-  return `${dayLabel}: ${jobCount} job${jobCount > 1 ? 's' : ''}, ${fmtHours(usedHours)} / ${fmtHours(capHours)} hrs`;
+  return `${dayLabel}: ${jobCount} job${jobCount > 1 ? 's' : ''}, ${formatHoursMinutes(usedHours)} / ${formatHoursMinutes(capHours)}`;
 }
 
 
