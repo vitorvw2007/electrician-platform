@@ -132,6 +132,12 @@
   tbody tr.u-med:hover{background:#F8ECCF}
   tbody tr.u-low{border-left-color:var(--low);background:var(--low-bg)}
   tbody tr.u-low:hover{background:#DEEEE6}
+  tbody tr.day-row{cursor:default;border-left:none}
+  tbody tr.day-row:hover{background:#FAFBFC}
+  tbody tr.day-row td{
+    background:#FAFBFC;color:var(--ink-soft);font-weight:600;font-size:.8rem;
+    padding:10px 16px;border-bottom:1px solid var(--line)
+  }
   td{padding:14px 16px;font-size:.9rem;vertical-align:middle}
   td.job{font-weight:600}
   .sub{display:block;font-size:.76rem;color:var(--muted);font-weight:400;margin-top:2px}
@@ -403,7 +409,7 @@
         <div class="scroll">
           <table>
             <thead>
-              <tr>
+              <tr id="rowsHead">
                 <th>Job type</th>
                 <th>Part of house</th>
                 <th>Est. labor</th>
