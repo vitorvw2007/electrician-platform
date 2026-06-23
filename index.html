@@ -173,10 +173,18 @@
   /* ---------- Day sections (Scheduled screen) ---------- */
   .day-section{margin-bottom:22px}
   .day-section-head{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
     font-family:var(--font-mono);font-size:.78rem;font-weight:600;color:var(--ink-soft);
     background:var(--g10);border:1px solid var(--line);border-radius:var(--radius);
     padding:10px 14px;margin-bottom:12px;
   }
+  .day-map-link{
+    font-family:var(--font-sans);font-size:.76rem;font-weight:600;color:#fff;
+    background:var(--blue60);padding:5px 12px;border-radius:0;text-decoration:none;
+    white-space:nowrap;flex:none;transition:background .12s;
+  }
+  .day-map-link:hover{background:var(--blue70)}
+  .day-map-link:focus-visible{outline:2px solid var(--blue60);outline-offset:2px}
   .day-section-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 
 
@@ -488,7 +496,7 @@
         </button>
         <button class="btn btn-secondary" id="exportBtn" title="Export data">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          Export
+          <span id="exportBtnLabel">Export Requests CSV</span>
         </button>
       </div>
     </header>
