@@ -57,14 +57,8 @@ function initializeEventListeners() {
   });
   document.getElementById('importBtn').addEventListener('click', () => openModal('importModal'));
   document.getElementById('exportBtn').addEventListener('click', exportData);
-  document.getElementById('navRequests').addEventListener('click', () => {
-    appState.currentScreen = 'overview';
-    updateUI();
-  });
-  document.getElementById('navScheduled').addEventListener('click', () => {
-    appState.currentScreen = 'scheduled';
-    updateUI();
-  });
+  document.getElementById('navRequests').addEventListener('click', () => goToScreen('overview'));
+  document.getElementById('navScheduled').addEventListener('click', () => goToScreen('scheduled'));
   document.getElementById('navSettings').addEventListener('click', () => openModal('settingsModal'));
   document.getElementById('schedSuggestBtn').addEventListener('click', applySuggestedWindow);
 }
@@ -495,6 +489,8 @@ function applyScreenChrome() {
       : 'Sorted by urgency. Select any card to open the full job summary.';
   document.getElementById('navRequests').classList.toggle('active', !scheduled);
   document.getElementById('navScheduled').classList.toggle('active', scheduled);
+  document.getElementById('exportBtnLabel').textContent =
+    scheduled ? 'Export as Calendar Events' : 'Export Requests CSV';
 }
 
 
@@ -634,7 +630,19 @@ function renderRows(list) {
       section.className = 'day-section';
       const head = document.createElement('div');
       head.className = 'day-section-head';
-      head.textContent = formatDayHeader(group.date, group.jobs.length);
+      const headLabel = document.createElement('span');
+      headLabel.textContent = formatDayHeader(group.date, group.jobs.length);
+      head.appendChild(headLabel);
+      const mapUrl = buildDayMapUrl(group.jobs);
+      if (mapUrl) {
+        const mapLink = document.createElement('a');
+        mapLink.className = 'day-map-link';
+        mapLink.href = mapUrl;
+        mapLink.target = '_blank';
+        mapLink.rel = 'noopener noreferrer';
+        mapLink.textContent = 'See map';
+        head.appendChild(mapLink);
+      }
       const cardsWrap = document.createElement('div');
       cardsWrap.className = 'day-section-cards';
       group.jobs.forEach(r => cardsWrap.appendChild(buildJobCard(r, true)));
@@ -814,14 +822,22 @@ function openDetail(id) {
 }
 
 
-// Return from a detail page to whichever screen it was opened from.
-function backToList() {
-  appState.currentScreen = detailOriginScreen;
+// Switch to a screen (Requests or Scheduled), leaving the detail view if one is open.
+// Used by the sidebar nav and by Back, so navigating away from a detail page always
+// lands on the right list instead of leaving a hidden, stale screen behind it.
+function goToScreen(screen) {
+  appState.currentScreen = screen;
   currentDetailId = null;
   document.getElementById('detail').classList.add('hidden');
   document.getElementById('overview').classList.remove('hidden');
   updateUI();
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+
+// Return from a detail page to whichever screen it was opened from.
+function backToList() {
+  goToScreen(detailOriginScreen);
 }
 
 
@@ -1319,6 +1335,32 @@ function formatDayHeader(date, jobCount) {
   const usedHours = dayScheduledMinutes(date) / 60;
   const capHours = appState.settings.dailyCapHours;
   return `${dayLabel}: ${jobCount} job${jobCount > 1 ? 's' : ''}, ${formatHoursMinutes(usedHours)} / ${formatHoursMinutes(capHours)}`;
+}
+
+
+// Build a Google Maps multi-stop directions URL for a day's jobs, in start-time order.
+// This "universal" URL format opens the user's installed maps app (or prompts a choice)
+// on Android and iOS, and falls back to Google Maps in the browser elsewhere. The base
+// address is used as the route's starting point when one is set; the maps app itself
+// lets the user change the start once the route opens.
+function buildDayMapUrl(jobs) {
+  const stops = jobs.filter(j => j.address && j.address.trim()).map(j => j.address.trim());
+  if (stops.length === 0) return null;
+
+  const params = new URLSearchParams();
+  params.set('api', '1');
+  params.set('travelmode', 'driving');
+
+  const baseAddress = appState.settings.baseAddress;
+  if (baseAddress) params.set('origin', baseAddress);
+
+  const destination = stops[stops.length - 1];
+  params.set('destination', destination);
+
+  const waypoints = stops.slice(0, -1);
+  if (waypoints.length > 0) params.set('waypoints', waypoints.join('|'));
+
+  return 'https://www.google.com/maps/dir/?' + params.toString();
 }
 
 
