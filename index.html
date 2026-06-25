@@ -731,3 +731,39 @@
   </div>
 </div>
 
+
+<!-- Schedule Modal -->
+<div id="scheduleModal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="schedTitle">Schedule service</h2>
+      <button class="modal-close" onclick="closeModal('scheduleModal')">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p id="schedRationale" style="margin:0 0 18px;color:var(--muted);font-size:.88rem"></p>
+      <div class="form-group">
+        <label for="schedStart">Start</label>
+        <input type="datetime-local" id="schedStart" oninput="onScheduleStartChange()">
+      </div>
+      <div class="form-group">
+        <label for="schedEnd">End</label>
+        <input type="datetime-local" id="schedEnd" oninput="refreshScheduleWarnings()">
+      </div>
+      <button class="btn btn-secondary" id="schedSuggestBtn" type="button">Use suggested window</button>
+      <div id="schedWarn" style="margin-top:16px"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
+      <button class="btn btn-primary" id="schedConfirmBtn" onclick="confirmSchedule()">Confirm schedule</button>
+    </div>
+  </div>
+</div>
+
+
+<script src="js-inference-engine.js"></script>
+<script src="js-ai-enrichment.js"></script>
+<script src="js-app.js"></script>
+
+
+</body>
+</html>
