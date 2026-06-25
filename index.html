@@ -135,6 +135,7 @@
     display:flex;flex-direction:column;
   }
   .menu[hidden]{display:none}
+  .menu.menu-center{right:auto;left:50%;transform:translateX(-50%)}
   .menu-item{
     display:flex;align-items:center;gap:10px;width:100%;text-align:left;
     background:none;border:none;color:var(--ink);font-family:var(--font-sans);
@@ -239,7 +240,9 @@
     letter-spacing:.01em;
   }
   .job-card-title{font-size:.96rem;font-weight:600;color:var(--ink)}
-  .job-card-meta{font-family:var(--font-mono);font-size:.78rem;color:var(--muted);letter-spacing:.01em}
+  .job-card-meta{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-family:var(--font-mono);font-size:.78rem;color:var(--muted);letter-spacing:.01em}
+  .job-card-date{color:var(--ink-soft);white-space:nowrap;flex:none}
+  .job-card-date.missing-date{color:var(--g50);font-style:italic}
   .job-card-rule{height:1px;background:var(--line)}
   .job-card-contacts{display:flex;flex-direction:column;gap:6px}
   .job-card-contact{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--ink-soft)}
@@ -580,11 +583,23 @@
         <div id="emptyState" class="empty-state hidden">
           <div class="empty-state-icon">📋</div>
           <h3>No requests yet</h3>
-          <p>Import a CSV file with customer service requests to get started</p>
-          <button class="btn btn-primary" onclick="openModal('importModal')">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            Import CSV File
-          </button>
+          <div class="menu-wrap" id="addRequestsWrapEmpty" style="display:inline-block">
+            <button class="btn btn-primary" id="addRequestsBtnEmpty" aria-haspopup="true" aria-expanded="false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Add Requests
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div class="menu menu-center" id="addRequestsMenuEmpty" role="menu" hidden>
+              <button class="menu-item" id="menuImportCsvEmpty" role="menuitem" type="button">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Import CSV
+              </button>
+              <button class="menu-item" id="menuConnectFormEmpty" role="menuitem" type="button">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M9 17v-2a4 4 0 0 1 4-4h6M15 7l4 4-4 4M3 7h6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Connect to form response
+              </button>
+            </div>
+          </div>
         </div>
 
 
@@ -716,39 +731,3 @@
   </div>
 </div>
 
-
-<!-- Schedule Modal -->
-<div id="scheduleModal" class="modal-overlay hidden">
-  <div class="modal">
-    <div class="modal-header">
-      <h2 id="schedTitle">Schedule service</h2>
-      <button class="modal-close" onclick="closeModal('scheduleModal')">&times;</button>
-    </div>
-    <div class="modal-body">
-      <p id="schedRationale" style="margin:0 0 18px;color:var(--muted);font-size:.88rem"></p>
-      <div class="form-group">
-        <label for="schedStart">Start</label>
-        <input type="datetime-local" id="schedStart" oninput="onScheduleStartChange()">
-      </div>
-      <div class="form-group">
-        <label for="schedEnd">End</label>
-        <input type="datetime-local" id="schedEnd" oninput="refreshScheduleWarnings()">
-      </div>
-      <button class="btn btn-secondary" id="schedSuggestBtn" type="button">Use suggested window</button>
-      <div id="schedWarn" style="margin-top:16px"></div>
-    </div>
-    <div class="modal-footer">
-      <button class="btn btn-secondary" onclick="closeModal('scheduleModal')">Cancel</button>
-      <button class="btn btn-primary" id="schedConfirmBtn" onclick="confirmSchedule()">Confirm schedule</button>
-    </div>
-  </div>
-</div>
-
-
-<script src="js-inference-engine.js"></script>
-<script src="js-ai-enrichment.js"></script>
-<script src="js-app.js"></script>
-
-
-</body>
-</html>
