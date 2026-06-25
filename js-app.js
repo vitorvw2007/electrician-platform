@@ -94,9 +94,23 @@ function initializeEventListeners() {
     closeAddRequestsMenu();
     connectToForm();
   });
-  // Close the menu on outside click or Escape.
+  // Same menu inside the empty state (no Clear option, since there is nothing to clear).
+  document.getElementById('addRequestsBtnEmpty').addEventListener('click', toggleAddRequestsMenuEmpty);
+  document.getElementById('menuImportCsvEmpty').addEventListener('click', () => {
+    closeAddRequestsMenu();
+    openModal('importModal');
+  });
+  document.getElementById('menuConnectFormEmpty').addEventListener('click', () => {
+    closeAddRequestsMenu();
+    connectToForm();
+  });
+  // Close any open menu on outside click or Escape.
   document.addEventListener('click', e => {
-    if (!document.getElementById('addRequestsWrap').contains(e.target)) closeAddRequestsMenu();
+    const inside = ADD_MENUS.some(m => {
+      const wrap = document.getElementById(m.wrap);
+      return wrap && wrap.contains(e.target);
+    });
+    if (!inside) closeAddRequestsMenu();
   });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape') closeAddRequestsMenu();
@@ -105,24 +119,36 @@ function initializeEventListeners() {
 
 
 // ============ ADD REQUESTS MENU ============
-function toggleAddRequestsMenu(e) {
+// Two instances: the top-bar menu and the one inside the empty state.
+const ADD_MENUS = [
+  { wrap: 'addRequestsWrap', btn: 'addRequestsBtn', menu: 'addRequestsMenu' },
+  { wrap: 'addRequestsWrapEmpty', btn: 'addRequestsBtnEmpty', menu: 'addRequestsMenuEmpty' }
+];
+
+
+function toggleAddRequestsMenu(e) { toggleMenu('addRequestsMenu', 'addRequestsBtn', e); }
+function toggleAddRequestsMenuEmpty(e) { toggleMenu('addRequestsMenuEmpty', 'addRequestsBtnEmpty', e); }
+
+
+function toggleMenu(menuId, btnId, e) {
   if (e) e.stopPropagation();
-  const menu = document.getElementById('addRequestsMenu');
-  menu.hidden ? openAddRequestsMenu() : closeAddRequestsMenu();
+  const willOpen = document.getElementById(menuId).hidden;
+  closeAddRequestsMenu();
+  if (willOpen) {
+    document.getElementById(menuId).hidden = false;
+    document.getElementById(btnId).setAttribute('aria-expanded', 'true');
+  }
 }
 
 
-function openAddRequestsMenu() {
-  document.getElementById('addRequestsMenu').hidden = false;
-  document.getElementById('addRequestsBtn').setAttribute('aria-expanded', 'true');
-}
-
-
+// Close every Add Requests menu (top bar and empty state).
 function closeAddRequestsMenu() {
-  const menu = document.getElementById('addRequestsMenu');
-  if (menu.hidden) return;
-  menu.hidden = true;
-  document.getElementById('addRequestsBtn').setAttribute('aria-expanded', 'false');
+  ADD_MENUS.forEach(m => {
+    const menu = document.getElementById(m.menu);
+    if (menu && !menu.hidden) menu.hidden = true;
+    const btn = document.getElementById(m.btn);
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  });
 }
 
 
@@ -808,7 +834,10 @@ function buildJobCard(r, showWindow) {
     ${windowHTML}
     ${aiBadgeHTML}
     <div class="job-card-title">${esc(r.jobType)}</div>
-    <div class="job-card-meta">${esc(r.partOfHouse)} &middot; ${esc(laborText)}</div>
+    <div class="job-card-meta">
+      <span>${esc(r.partOfHouse)} &middot; ${esc(laborText)}</span>
+      <span class="job-card-date${r.requestedDate ? '' : ' missing-date'}">${r.requestedDate ? esc(formatRequestedDate(r.requestedDate)) : 'No date'}</span>
+    </div>
     <div class="job-card-rule"></div>
     <div class="job-card-contacts">
       <div class="job-card-contact">${ICO_PERSON}${r.name ? esc(r.name) : '<span class="missing">Not provided</span>'}</div>
