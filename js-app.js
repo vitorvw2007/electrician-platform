@@ -17,7 +17,9 @@ let appState = {
     dailyCapHours: 8.5,
     lunchEnabled: false,
     lunchStart: '12:00',
-    lunchEnd: '13:00'
+    lunchEnd: '13:00',
+    groqApiKey: '',
+    sortBy: 'date-asc'
   },
   calendar: [],
   currentScreen: 'overview'
@@ -29,6 +31,14 @@ const BUFFER_MINUTES = 15;
 const SCHEDULE_HORIZON_DAYS = 14;
 const SLOT_GRANULARITY_MINUTES = 15;
 const PLACEHOLDER_WINDOW_HOURS = 1;
+
+
+// Monotonic counter so request ids stay unique even across appends in the same
+// millisecond. Combined with the timestamp, ids never collide within or across imports.
+let _idCounter = 0;
+function makeRequestId() {
+  return `req_${Date.now()}_${_idCounter++}`;
+}
 
 
 // ============ INITIALIZATION ============
@@ -55,12 +65,94 @@ function initializeEventListeners() {
       openModal('settingsModal');
     }
   });
-  document.getElementById('importBtn').addEventListener('click', () => openModal('importModal'));
   document.getElementById('exportBtn').addEventListener('click', exportData);
   document.getElementById('navRequests').addEventListener('click', () => goToScreen('overview'));
   document.getElementById('navScheduled').addEventListener('click', () => goToScreen('scheduled'));
   document.getElementById('navSettings').addEventListener('click', () => openModal('settingsModal'));
   document.getElementById('schedSuggestBtn').addEventListener('click', applySuggestedWindow);
+
+  // Sort control on the Requests board
+  const sortSelect = document.getElementById('sortSelect');
+  sortSelect.value = appState.settings.sortBy;
+  sortSelect.addEventListener('change', () => {
+    appState.settings.sortBy = sortSelect.value;
+    localStorage.setItem('electrician_settings', JSON.stringify(appState.settings));
+    renderRows(currentList());
+  });
+
+  // "Add Requests" dropdown menu
+  document.getElementById('addRequestsBtn').addEventListener('click', toggleAddRequestsMenu);
+  document.getElementById('menuImportCsv').addEventListener('click', () => {
+    closeAddRequestsMenu();
+    openModal('importModal');
+  });
+  document.getElementById('menuClearRequests').addEventListener('click', () => {
+    closeAddRequestsMenu();
+    clearRequests();
+  });
+  document.getElementById('menuConnectForm').addEventListener('click', () => {
+    closeAddRequestsMenu();
+    connectToForm();
+  });
+  // Close the menu on outside click or Escape.
+  document.addEventListener('click', e => {
+    if (!document.getElementById('addRequestsWrap').contains(e.target)) closeAddRequestsMenu();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeAddRequestsMenu();
+  });
+}
+
+
+// ============ ADD REQUESTS MENU ============
+function toggleAddRequestsMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('addRequestsMenu');
+  menu.hidden ? openAddRequestsMenu() : closeAddRequestsMenu();
+}
+
+
+function openAddRequestsMenu() {
+  document.getElementById('addRequestsMenu').hidden = false;
+  document.getElementById('addRequestsBtn').setAttribute('aria-expanded', 'true');
+}
+
+
+function closeAddRequestsMenu() {
+  const menu = document.getElementById('addRequestsMenu');
+  if (menu.hidden) return;
+  menu.hidden = true;
+  document.getElementById('addRequestsBtn').setAttribute('aria-expanded', 'false');
+}
+
+
+// Clear unscheduled requests only; scheduled/booked jobs are kept. Asks first.
+function clearRequests() {
+  const unscheduled = appState.requests.filter(r => r.scheduled !== true);
+  if (unscheduled.length === 0) {
+    alert('There are no unscheduled requests to clear.');
+    return;
+  }
+  const keptScheduled = appState.requests.length - unscheduled.length;
+  const msg = keptScheduled > 0
+    ? `Clear ${unscheduled.length} unscheduled request${unscheduled.length > 1 ? 's' : ''}? ${keptScheduled} scheduled job${keptScheduled > 1 ? 's' : ''} will be kept. This cannot be undone.`
+    : `Clear ${unscheduled.length} unscheduled request${unscheduled.length > 1 ? 's' : ''}? This cannot be undone.`;
+  if (!confirm(msg)) return;
+
+  appState.requests = appState.requests.filter(r => r.scheduled === true);
+  saveData();
+  if (currentDetailId !== null) {
+    currentDetailId = null;
+    document.getElementById('detail').classList.add('hidden');
+    document.getElementById('overview').classList.remove('hidden');
+  }
+  updateUI();
+}
+
+
+// Placeholder until a form-connection approach is wired up in a later step.
+function connectToForm() {
+  alert('Connect to form response is coming soon. For now, export your form responses to CSV and use Import CSV.');
 }
 
 
@@ -75,6 +167,7 @@ function loadSettings() {
   appState.settings.businessEndHour = numOr(appState.settings.businessEndHour, 17);
   appState.settings.dailyCapHours = numOr(appState.settings.dailyCapHours, 8.5);
   appState.settings.lunchEnabled = !!appState.settings.lunchEnabled;
+  if (!SORT_OPTIONS.includes(appState.settings.sortBy)) appState.settings.sortBy = 'date-asc';
   updateBaseLabel();
 }
 
@@ -136,6 +229,7 @@ function saveSettings() {
   appState.settings.lunchEnabled = lunchEnabled;
   appState.settings.lunchStart = lunchStart;
   appState.settings.lunchEnd = lunchEnd;
+  appState.settings.groqApiKey = document.getElementById('groqApiKey').value.trim();
 
   // Geocode address (simplified - in production use a real geocoding API)
   if (baseAddress) {
@@ -168,6 +262,7 @@ function updateBaseLabel() {
   document.getElementById('lunchEnabled').checked = !!appState.settings.lunchEnabled;
   document.getElementById('lunchStart').value = appState.settings.lunchStart;
   document.getElementById('lunchEnd').value = appState.settings.lunchEnd;
+  document.getElementById('groqApiKey').value = appState.settings.groqApiKey || '';
 }
 
 
@@ -199,6 +294,7 @@ function loadData() {
       if (typeof req.scheduled !== 'boolean') req.scheduled = false;
       if (req.scheduledStart === undefined) req.scheduledStart = null;
       if (req.scheduledEnd === undefined) req.scheduledEnd = null;
+      if (req.requestedDate === undefined) req.requestedDate = null;
     });
   }
 }
@@ -248,6 +344,7 @@ function parseCSV(csv) {
   const phoneIdx = headers.findIndex(h => h.includes('phone'));
   const emailIdx = headers.findIndex(h => h.includes('email'));
   const addressIdx = headers.findIndex(h => h.includes('address'));
+  const dateIdx = headers.findIndex(h => h.includes('date'));
   const messageIdx = headers.findIndex(h => h.includes('description') || h.includes('problem') || h.includes('message'));
 
   if (messageIdx === -1) {
@@ -259,12 +356,13 @@ function parseCSV(csv) {
     if (values.length < headers.length) continue;
 
     const request = {
-      id: Date.now() + i,
+      id: makeRequestId(),
       name: nameIdx >= 0 ? values[nameIdx]?.trim() : '',
       phone: phoneIdx >= 0 ? values[phoneIdx]?.trim() : '',
       email: emailIdx >= 0 ? values[emailIdx]?.trim() : '',
       address: addressIdx >= 0 ? values[addressIdx]?.trim() : '',
       message: messageIdx >= 0 ? values[messageIdx]?.trim() : '',
+      requestedDate: dateIdx >= 0 ? parseRequestedDate(values[dateIdx]) : null,
       scheduled: false,
       scheduledStart: null,
       scheduledEnd: null
@@ -312,19 +410,137 @@ function parseCSVLine(line) {
 }
 
 
+// Parse a "Date Requested" cell into an ISO string, or null when missing/unparseable.
+// Accepts "YYYY-MM-DD HH:MM", "YYYY-MM-DD", and other Date-parseable forms; a missing
+// or invalid value becomes null (treated as unknown) so it never blocks an import.
+function parseRequestedDate(raw) {
+  const str = (raw || '').trim();
+  if (!str) return null;
+  // Normalize "YYYY-MM-DD HH:MM" to ISO-ish "YYYY-MM-DDTHH:MM" so it parses as local time.
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(str) ? str.replace(' ', 'T') : str;
+  const d = new Date(normalized);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+
+// Identity key for duplicate detection: same customer name, phone, and message.
+function dedupeKey(job) {
+  return [job.name || '', job.phone || '', job.message || '']
+    .map(s => s.trim().toLowerCase())
+    .join('||');
+}
+
+
 function confirmImport() {
   if (!pendingCSVData) return;
 
-  appState.requests = pendingCSVData;
+  // Append to existing requests, skipping rows that exactly match one already present
+  // (same name + phone + message) so re-importing the same file does not double up.
+  const existingKeys = new Set(appState.requests.map(dedupeKey));
+  const newJobs = pendingCSVData.filter(job => {
+    const key = dedupeKey(job);
+    if (existingKeys.has(key)) return false;
+    existingKeys.add(key);
+    return true;
+  });
+  appState.requests = appState.requests.concat(newJobs);
   saveData();
   updateUI();
   closeModal('importModal');
+  enrichNotDeterminedJobs(newJobs);
+
+  const skipped = pendingCSVData.length - newJobs.length;
+  if (skipped > 0) {
+    alert(`Imported ${newJobs.length} request${newJobs.length === 1 ? '' : 's'}. Skipped ${skipped} duplicate${skipped === 1 ? '' : 's'} already in the list.`);
+  }
 
   // Reset import state
   pendingCSVData = null;
   document.getElementById('csvFile').value = '';
   document.getElementById('importPreview').classList.add('hidden');
   document.getElementById('confirmImport').disabled = true;
+}
+
+
+// ============ AI ENRICHMENT (optional, only for "Not determined" jobs) ============
+// Transient, in-session only: never persisted, since they're just UI feedback about
+// in-flight or failed AI calls, not data about the job itself.
+const aiPendingIds = new Set();
+const aiErrorMessages = new Map();
+
+
+// Only the "message unclear" case is eligible. The "no description provided" case
+// has no message for the AI to read either, so it is never sent.
+function isAiEligible(r) {
+  return r.jobType === 'Not determined (message unclear)';
+}
+
+
+// Run AI classification for one job: shows a pending badge while in flight, merges
+// the result into the job on success, records an error message on failure. Safe to
+// call with no API key configured (AIEnrichment.classify fails fast in that case).
+async function runAIClassification(job) {
+  aiPendingIds.add(job.id);
+  aiErrorMessages.delete(job.id);
+  refreshAfterAIChange(job.id);
+
+  try {
+    const result = await AIEnrichment.classify(
+      job.message,
+      { name: job.name, address: job.address },
+      appState.settings.groqApiKey
+    );
+    job.jobType = result.jobType;
+    job.partOfHouse = result.partOfHouse;
+    job.urgency = result.urgency;
+    job.laborMin = result.laborEstimate.min;
+    job.laborMax = result.laborEstimate.max;
+    job.materials = result.materials;
+    job.tools = result.tools;
+    job.uncertainties = result.uncertainties;
+    job.inScope = result.inScope;
+    saveData();
+  } catch (err) {
+    aiErrorMessages.set(job.id, err.message || 'AI classification failed.');
+    console.warn('AI classification failed for job', job.id, err);
+  } finally {
+    aiPendingIds.delete(job.id);
+    refreshAfterAIChange(job.id);
+  }
+}
+
+
+// Re-render whatever is currently visible so AI pending/result state shows up live,
+// whether that's the board (card badge) or an open detail page for this job.
+function refreshAfterAIChange(jobId) {
+  updateUI();
+  if (currentDetailId === jobId && !document.getElementById('detail').classList.contains('hidden')) {
+    openDetail(jobId);
+  }
+}
+
+
+// Kick off background AI classification for every eligible Not Determined job after
+// an import. No-op when no API key is configured, so behavior without a key is
+// unchanged. Runs one job at a time to stay polite to the free-tier rate limit.
+async function enrichNotDeterminedJobs(jobs) {
+  if (!appState.settings.groqApiKey) return;
+  const eligible = jobs.filter(isAiEligible);
+  for (const job of eligible) {
+    await runAIClassification(job);
+  }
+}
+
+
+// Manual retry, wired to the "Try AI classification" button on a job's detail page.
+function retryAIClassification(id) {
+  const job = appState.requests.find(x => x.id === id);
+  if (!job) return;
+  if (!appState.settings.groqApiKey) {
+    alert('Add a Groq API key in Settings to enable AI classification.');
+    return;
+  }
+  runAIClassification(job);
 }
 
 
@@ -491,6 +707,9 @@ function applyScreenChrome() {
   document.getElementById('navScheduled').classList.toggle('active', scheduled);
   document.getElementById('exportBtnLabel').textContent =
     scheduled ? 'Export as Calendar Events' : 'Export Requests CSV';
+  // Adding requests only makes sense on the Requests screen, so hide it on Scheduled.
+  if (scheduled) closeAddRequestsMenu();
+  document.getElementById('addRequestsWrap').classList.toggle('hidden', scheduled);
 }
 
 
@@ -519,8 +738,48 @@ function renderSummary(list) {
 }
 
 
-const URGENCY_RANK = { high: 0, medium: 1, low: 2 };
 const URG_CLASS = { high: 'high', medium: 'med', low: 'low' };
+
+
+// Valid "sort by" values for the Requests board: "<field>-<direction>".
+const SORT_OPTIONS = ['date-asc', 'date-desc', 'distance-asc', 'distance-desc', 'labor-asc', 'labor-desc'];
+
+
+// The sortable numeric value for a job under a given field, or null when missing.
+// Missing values are treated as the lowest value (see sortComparator), so they follow
+// the sort direction: bottom when descending, top when ascending.
+function sortValue(job, field) {
+  if (field === 'date') {
+    if (!job.requestedDate) return null;
+    const t = new Date(job.requestedDate).getTime();
+    return isNaN(t) ? null : t;
+  }
+  if (field === 'distance') {
+    // With no base set, every card is equidistant (stable order). With a base but no
+    // geocoded point, the distance is unknown (missing).
+    if (!appState.settings.baseCoordinates) return 0;
+    if (!job.point) return null;
+    return straightLineMiles(appState.settings.baseCoordinates, job.point) * 1.3;
+  }
+  if (field === 'labor') {
+    return ((job.laborMin || 0) + (job.laborMax || 0)) / 2;
+  }
+  return null;
+}
+
+
+// Build a comparator from a "<field>-<direction>" sort key. Missing values sort as the
+// lowest value, so ascending puts them first and descending puts them last.
+function sortComparator(sortBy) {
+  const [field, dir] = String(sortBy || 'date-asc').split('-');
+  return (a, b) => {
+    let va = sortValue(a, field);
+    let vb = sortValue(b, field);
+    if (va === null) va = -Infinity;
+    if (vb === null) vb = -Infinity;
+    return dir === 'desc' ? vb - va : va - vb;
+  };
+}
 
 
 // Small inline icons reused inside job cards.
@@ -543,9 +802,11 @@ function buildJobCard(r, showWindow) {
   const windowHTML = showWindow
     ? `<div class="job-card-window">${esc(formatWindowTimeRange(r.scheduledStart, r.scheduledEnd))}</div>`
     : '';
+  const aiBadgeHTML = aiPendingIds.has(r.id) ? `<div class="ai-badge">Checking with AI...</div>` : '';
 
   card.innerHTML = `
     ${windowHTML}
+    ${aiBadgeHTML}
     <div class="job-card-title">${esc(r.jobType)}</div>
     <div class="job-card-meta">${esc(r.partOfHouse)} &middot; ${esc(laborText)}</div>
     <div class="job-card-rule"></div>
@@ -582,18 +843,20 @@ function renderRows(list) {
 
   const scheduledScreen = appState.currentScreen === 'scheduled';
 
+  // The sort control only applies to the Requests board, so show it only there.
+  document.getElementById('sortBar').classList.toggle('hidden', scheduledScreen);
+
   if (!scheduledScreen) {
     board.className = 'board board-urgency';
-    const sorted = [...list].sort((a, b) =>
-      URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency]
-    );
+    const compare = sortComparator(appState.settings.sortBy);
     const columns = [
       { key: 'high', label: 'High urgency' },
       { key: 'medium', label: 'Medium urgency' },
       { key: 'low', label: 'Low urgency' }
     ];
     columns.forEach(col => {
-      const colJobs = sorted.filter(r => r.urgency === col.key);
+      // Each urgency column is sorted independently by the chosen criteria.
+      const colJobs = list.filter(r => r.urgency === col.key).sort(compare);
       const colEl = document.createElement('div');
       colEl.className = 'board-col';
       const head = document.createElement('div');
@@ -719,6 +982,21 @@ function openDetail(id) {
        </div>`
     : `<p class="missing" style="margin:4px 0 0">Address not provided. Collect it to estimate distance and drive time.</p>`;
 
+  // AI classification section: only for "Not determined (message unclear)" jobs, since
+  // the "no description provided" case has nothing for the AI to read either.
+  const hasKey = !!appState.settings.groqApiKey;
+  const aiPending = aiPendingIds.has(r.id);
+  const aiError = aiErrorMessages.get(r.id);
+  const aiSection = isAiEligible(r) ? `
+    <div class="divider"></div>
+    <p class="block-label">AI classification</p>
+    ${aiPending
+      ? `<div class="ai-badge">Checking with AI...</div>`
+      : `<button class="btn btn-secondary" onclick="retryAIClassification(${JSON.stringify(r.id)})" ${hasKey ? '' : 'disabled'}>Try AI classification</button>
+         ${hasKey ? '' : '<p class="missing" style="margin-top:8px">Add a Groq API key in Settings to enable this.</p>'}
+         ${aiError ? `<p class="ai-error">${esc(aiError)}</p>` : ''}`}
+  ` : '';
+
   // Schedule area: differs for unscheduled versus scheduled jobs.
   const scheduleArea = r.scheduled
     ? `<div class="card" style="margin-bottom:18px">
@@ -761,6 +1039,7 @@ function openDetail(id) {
         <h3><span class="num">1</span> Job & customer</h3>
         <dl class="kv">
           <dt>Customer</dt><dd>${r.name ? esc(r.name) : '<span class="missing">Not provided</span>'}</dd>
+          <dt>Requested</dt><dd>${r.requestedDate ? esc(formatRequestedDate(r.requestedDate)) : '<span class="missing">Not provided</span>'}</dd>
           <dt>Address</dt><dd>${r.address ? esc(r.address) : '<span class="missing">Not provided</span>'}</dd>
           <dt>Phone</dt><dd class="mono">${r.phone ? esc(r.phone) : '<span class="missing">Not provided</span>'}</dd>
           <dt>Email</dt><dd class="mono">${r.email ? `<a href="mailto:${esc(r.email)}">${esc(r.email)}</a>` : '<span class="missing">Not provided</span>'}</dd>
@@ -774,6 +1053,7 @@ function openDetail(id) {
         <div class="divider"></div>
         <p class="block-label">Customer's message</p>
         <p class="msg">${esc(r.message)}</p>
+        ${aiSection}
 
 
         <div class="divider"></div>
@@ -1287,6 +1567,17 @@ function toDatetimeLocalValue(date) {
 
 // Locale fixed to English so weekday and month names never follow the browser/OS locale.
 const DATE_LOCALE = 'en-US';
+
+
+// "Jun 22, 2:30 PM" style display for a request's submitted date.
+function formatRequestedDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const day = d.toLocaleDateString(DATE_LOCALE, { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString(DATE_LOCALE, { hour: 'numeric', minute: '2-digit' });
+  return `${day}, ${time}`;
+}
 
 
 // "Mon, Jun 23, 9:00 AM to 11:30 AM" style summary for a scheduled window.
