@@ -452,7 +452,8 @@
 
 
   .empty-state{
-    text-align:center;padding:60px 20px;color:var(--muted);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    text-align:center;padding:60px 20px;color:var(--muted);min-height:60vh;
   }
   .empty-state-icon{font-size:3rem;margin-bottom:16px;opacity:.5}
   .empty-state h3{margin:0 0 8px;color:var(--ink-soft);font-size:1.1rem}
@@ -583,7 +584,7 @@
         <div id="emptyState" class="empty-state hidden">
           <div class="empty-state-icon">📋</div>
           <h3>No requests yet</h3>
-          <div class="menu-wrap" id="addRequestsWrapEmpty" style="display:inline-block">
+          <div class="menu-wrap" id="addRequestsWrapEmpty">
             <button class="btn btn-primary" id="addRequestsBtnEmpty" aria-haspopup="true" aria-expanded="false">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
               Add Requests
